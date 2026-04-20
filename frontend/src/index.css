@@ -1,0 +1,491 @@
+/* --- Global Styles --- */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #f8fafc; /* Slate 100 */
+  color: #334155; /* Slate 700 */
+  margin: 0;
+  padding: 0;
+}
+
+/* --- Utility Styles --- */
+.button-primary {
+  background-color: #3b82f6; /* Blue 500 */
+  color: white;
+  font-size: 1rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.button-primary:hover {
+  background-color: #2563eb; /* Blue 600 */
+}
+.button-primary:disabled {
+  background-color: #9ca3af; /* Gray 400 */
+  cursor: not-allowed;
+}
+
+.button-secondary {
+  background-color: #e2e8f0; /* Slate 200 */
+  color: #334155; /* Slate 700 */
+  font-size: 1rem; /* Matched to primary button */
+  font-weight: 500;
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.5rem; /* Matched to primary button */
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.button-secondary:hover {
+  background-color: #cbd5e1; /* Slate 300 */
+}
+.button-secondary:disabled {
+  background-color: #e2e8f0; /* Slate 200 */
+  color: #9ca3af; /* Gray 400 */
+  cursor: not-allowed;
+}
+
+
+/* --- Layouts & Containers --- */
+.card {
+  max-width: 450px;
+  margin: 3rem auto;
+  padding: 2.5rem;
+  background-color: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -2px rgba(0, 0, 0, 0.1);
+}
+
+.header-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background-color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.header-nav h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #3b82f6;
+  margin: 0;
+}
+.header-user-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.header-user-info span {
+  color: #475569; /* Slate 600 */
+}
+
+/* --- Hero/Landing Page --- */
+.hero-container {
+  max-width: 650px;
+  margin: 6rem auto;
+  text-align: center;
+  padding: 0 1rem;
+}
+.hero-title {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #1e293b; /* Slate 800 */
+  line-height: 1.2;
+}
+.hero-highlight {
+  color: #3b82f6; /* Blue 500 */
+}
+.hero-subtitle {
+  font-size: 1.125rem;
+  color: #64748b; /* Slate 500 */
+  margin: 1.5rem 0 2.5rem 0;
+  line-height: 1.6;
+}
+.hero-button {
+  font-size: 1.125rem;
+  padding: 0.875rem 2rem;
+}
+
+/* --- Auth Form --- */
+.form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+.form-group label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+.form-input {
+  font-size: 1rem;
+  padding: 0.75rem;
+  border: 1px solid #cbd5e1; /* Slate 300 */
+  border-radius: 0.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+.back-link {
+  background: none;
+  border: none;
+  color: #64748b; /* Slate 500 */
+  cursor: pointer;
+  font-size: 0.875rem;
+  display: block;
+  margin-bottom: 1.5rem;
+  transition: color 0.2s;
+}
+.back-link:hover {
+  color: #3b82f6; /* Blue 500 */
+}
+
+/* --- Loading Spinners --- */
+.loading-spinner {
+  border: 4px solid #e2e8f0; /* Slate 200 */
+  border-top-color: #3b82f6; /* Blue 500 */
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 10rem auto;
+}
+.button-spinner {
+  border: 3px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  width: 1rem;
+  height: 1rem;
+  animation: spin 1s linear infinite;
+}
+.button-spinner-light {
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  width: 1rem;
+  height: 1rem;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* --- Topic Selection & Editor --- */
+.form-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+.form-subtitle {
+  font-size: 1rem;
+  color: #64748b;
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+}
+.topic-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+}
+.topic-button {
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px; /* Pill shape */
+  border: 1px solid #cbd5e1; /* Slate 300 */
+  background-color: #f8fafc; /* Slate 50 */
+  color: #334155; /* Slate 700 */
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+.topic-button:hover {
+  background-color: #f1f5f9; /* Slate 100 */
+  border-color: #94a3b8; /* Slate 400 */
+}
+/* Style for selected buttons */
+.topic-button[data-selected='true'] {
+  background-color: #3b82f6; /* Blue 500 */
+  color: white;
+  border-color: #3b82f6;
+}
+.topic-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 2rem;
+  border-top: 1px solid #e2e8f0; /* Slate 200 */
+  padding-top: 1.5rem;
+}
+
+/* --- News Feed Styles --- */
+
+.feed-container {
+  max-width: 768px; /* Make the feed column a bit wider */
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.feed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start; /* Align top */
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #e2e8f0; /* Slate 200 */
+  gap: 1rem;
+}
+.feed-header-title {
+  flex-grow: 1;
+}
+.feed-actions {
+  display: flex;
+  gap: 1rem;
+  flex-shrink: 0; /* Don't let buttons wrap */
+  align-items: center; /* Vertically center buttons and text */
+}
+
+.feed-title {
+  font-size: 1.875rem; /* 30px */
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: #1e293b;
+}
+
+.feed-subtitle {
+  font-size: 1rem;
+  color: #64748b;
+  margin-top: 0;
+  margin-bottom: 0; /* Removed bottom margin */
+}
+
+.refresh-success {
+  color: #16a34a; /* Green 600 */
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+.error-message {
+  color: #dc2626; /* Red 600 */
+  background-color: #fee2e2; /* Red 100 */
+  border: 1px solid #fca5a5; /* Red 300 */
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.feed-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem; /* Space between article cards */
+}
+
+/* This makes the whole card clickable */
+.article-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.article-card {
+  background-color: #ffffff;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  overflow: hidden; /* Ensures the image corners are rounded */
+  display: flex; /* Changed from default */
+  gap: 1.5rem; /* Added gap for image */
+  transition: box-shadow 0.2s ease-in-out;
+}
+
+.article-card:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -4px rgba(0, 0, 0, 0.1);
+}
+
+.article-image {
+  width: 150px;
+  height: 150px;
+  object-fit: cover; /* This is key for nice images */
+  flex-shrink: 0; /* Prevents image from shrinking */
+}
+
+.article-content {
+  padding: 1rem;
+  padding-left: 0; /* Padding is handled by the gap */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* Take up the remaining space */
+  flex-grow: 1; 
+  /* This is to fix a flexbox bug in some browsers */
+  min-width: 0;
+}
+
+.article-source {
+  font-size: 0.875rem; /* 14px */
+  font-weight: 500;
+  color: #64748b; /* Slate gray */
+  text-transform: uppercase;
+}
+
+.article-title {
+  font-size: 1.125rem; /* 18px */
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0;
+  /* This will cut off long titles with '...' */
+  display: -webkit-box;
+  line-clamp: 2; /* Standard property */
+  -webkit-line-clamp: 2; /* Fallback for older browsers */
+  -webkit-box-orient: vertical;  
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.article-summary {
+  font-size: 0.875rem;
+  color: #334155;
+  line-height: 1.5;
+  margin: 0;
+  /* This will cut off long summaries with '...' */
+  display: -webkit-box;
+  line-clamp: 2; /* Standard property */
+  -webkit-line-clamp: 2; /* Fallback for older browsers */
+  -webkit-box-orient: vertical;  
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- THIS IS THE NEW CLASS --- */
+.article-summary-fallback {
+  font-size: 0.875rem;
+  color: #64748b; /* Slate 500 */
+  font-style: italic;
+  line-height: 1.5;
+  margin: 0;
+}
+/* --- NEW SEARCH BAR STYLES --- */
+.search-bar-container {
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #e2e8f0; /* Slate 200 */
+}
+
+.search-form {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+}
+
+.search-input {
+  flex-grow: 1; /* Make the input take most of the space */
+  font-size: 1rem;
+  padding: 0.75rem 1rem; /* Taller padding */
+  border: 1px solid #cbd5e1; /* Slate 300 */
+  border-radius: 0.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+/* Make the search button a bit smaller to match input */
+.search-form .button-primary {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem; /* A bit smaller text */
+}
+
+/* Use the existing back-link style for clearing search */
+.search-bar-container .back-link {
+  margin-top: 1rem;
+  margin-bottom: 0;
+  display: inline-block; /* So it doesn't take full width */
+}
+
+.body-gradient {
+  /* This creates the beautiful gradient background */
+  background-image: radial-gradient(
+    at 80% 0%, 
+    hsla(214, 89%, 95%, 1) 0px, 
+    transparent 50%
+  ),
+  radial-gradient(
+    at 20% 100%, 
+    hsla(220, 89%, 95%, 1) 0px, 
+    transparent 50%
+  );
+  /* Ensures it covers the whole page, even if content is short */
+  min-height: 100vh;
+}
+
+.landing-page-container {
+  /* This container will hold the hero and the carousel */
+  width: 100%;
+  overflow-x: hidden; /* Hide horizontal scroll */
+}
+
+/* Make the hero section stand out more */
+.hero-container {
+  padding-top: 8rem; /* Add more space at the top */
+  padding-bottom: 6rem; /* Add space between hero and carousel */
+}
+
+/* --- NEW CAROUSEL STYLES --- */
+.carousel-container {
+  max-width: 900px; /* A bit wider for the carousel */
+  margin: 0 auto;
+  padding: 2rem 0;
+  position: relative;
+}
+
+.topic-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 2rem;
+  border-top: 1px solid #e2e8f0; /* Slate 200 */
+  padding-top: 1.5rem;
+}
+
+/* --- NEW MUTE KEYWORD STYLES --- */
+.mute-container {
+  padding-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid #e2e8f0; /* Slate 200 */
+}
+
+.mute-form {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+}
+
+.mute-input {
+  flex-grow: 1;
+  font-size: 1rem;
+  padding: 0.75rem
+}

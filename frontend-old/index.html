@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI News Aggregator</title>
+
+    <!-- 1. Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 2. Configure Tailwind (optional, but good for fonts) -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+
+    <!-- 3. Load React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- 4. Load Babel to transpile JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Basic page styles -->
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50">
+    <!-- This is where our React app will be mounted -->
+    <div id="root"></div>
+
+    <!-- 5. The entire React Application -->
+    <script type="text/babel">
+      const { useState, useEffect, Fragment, useCallback } = React;
+      const API_URL = "http://127.0.0.1:8000";
+
+      // --- Reusable Components ---
+
+      /**
+       * A simple loading spinner component
+       */
+      function Spinner({ color = "border-white" }) {
+        return (
+          <div
+            className={`animate-spin rounded-full h-5 w-5 border-b-2 ${color}`}
+          ></div>
+        );
+      }
+
+      /**
+       * A larger spinner for page loading
+       */
+      function PageSpinner() {
+        return (
+          <div className="flex-grow flex items-center justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-indigo-600"></div>
+          </div>
+        );
+      }
+
+      /**
+       * The header for the public-facing landing page
+       */
+      function PublicHeader({ setView }) {
+        return (
+          <header className="bg-white shadow-sm">
+            <nav className="container mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex justify-between items-center h-16">
+                {/* Logo/Brand Name */}
+                <div className="flex-shrink-0 flex items-center">
+                  <span className="text-2xl font-bold text-indigo-600">
+                    NewsAI
+                  </span>
+                </div>
+
+                {/* Navigation Buttons */}
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => setView("login")}
+                    className="text-gray-600 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium"
+                  >
+                    Log In
+                  </button>
+                  <button
+                    onClick={() => setView("signup")}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium shadow"
+                  >
+                    Sign Up
+                  </button>
+                </div>
+              </div>
+            </nav>
+          </header>
+        );
+      }
+
+      /**
+       * The main "Hero" section for the landing page
+       */
+      function HeroSection({ setView }) {
+        return (
+          <div className="flex-grow flex items-center justify-center">
+            <div className="text-center p-8">
+              <h1 className="text-4xl md:text-6xl font-extrabold text-gray-900 leading-tight mb-4">
+                Your News,
+                <br />
+                <span className="text-indigo-600">Intelligently Curated.</span>
+              </h1>
+              <p className="text-lg md:text-xl text-gray-600 max-w-2xl mx-auto mb-8">
+                Stop sifting through noise. NewsAI uses artificial intelligence
+                to find the stories that matter to you, personalized from your
+                favorite topics.
+              </p>
+              <button
+                onClick={() => setView("signup")}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-md text-lg font-medium shadow-lg transition duration-300"
+              >
+                Get Started for Free
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      /**
+       * The combined Login/Signup Form Component
+       */
+      function AuthForm({ mode, setAuthToken, setView }) {
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
+        const [isLoading, setIsLoading] = useState(false);
+        const [error, setError] = useState(null);
+        const [message, setMessage] = useState(null);
+
+        const isLogin = mode === "login";
+        const title = isLogin ? "Welcome Back!" : "Create Your Account";
+        const buttonText = isLogin ? "Log In" : "Sign Up";
+        const toggleText = isLogin
+          ? "Don't have an account?"
+          : "Already have an account?";
+        const toggleView = isLogin ? "signup" : "login";
+
+        const handleSubmit = async (e) => {
+          e.preventDefault();
+          setIsLoading(true);
+          setError(null);
+          setMessage(null);
+
+          try {
+            let response;
+            if (isLogin) {
+              // --- Login Request (Form Data) ---
+              const formData = new URLSearchParams();
+              formData.append("username", email);
+              formData.append("password", password);
+
+              response = await fetch(`${API_URL}/login`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: formData,
+              });
+            } else {
+              // --- Signup Request (JSON) ---
+              response = await fetch(`${API_URL}/signup`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ email, password }),
+              });
+            }
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(data.detail || "An unknown error occurred.");
+            }
+
+            if (isLogin) {
+              setAuthToken(data.access_token);
+            } else {
+              setMessage("Account created successfully! Please log in.");
+              setView("login");
+            }
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        return (
+          <div className="flex-grow flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-2xl">
+              <h2 className="text-3xl font-bold text-center text-gray-900 mb-6">
+                {title}
+              </h2>
+
+              <form onSubmit={handleSubmit}>
+                {error && (
+                  <div
+                    className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md mb-4"
+                    role="alert"
+                  >
+                    <span className="block sm:inline">{error}</span>
+                  </div>
+                )}
+
+                {message && (
+                  <div
+                    className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-md mb-4"
+                    role="alert"
+                  >
+                    <span className="block sm:inline">{message}</span>
+                  </div>
+                )}
+
+                <div className="mb-4">
+                  <label
+                    className="block text-gray-700 text-sm font-medium mb-2"
+                    htmlFor="email"
+                  >
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    id="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="you@example.com"
+                  />
+                </div>
+
+                <div className="mb-6">
+                  <label
+                    className="block text-gray-700 text-sm font-medium mb-2"
+                    htmlFor="password"
+                  >
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    id="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength="6"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="••••••••"
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-md shadow-lg flex items-center justify-center disabled:bg-indigo-400 transition duration-300"
+                  >
+                    {isLoading ? <Spinner /> : buttonText}
+                  </button>
+                </div>
+              </form>
+
+              <p className="text-center text-gray-600 text-sm mt-6">
+                {toggleText}
+                <button
+                  onClick={() => {
+                    setView(toggleView);
+                    setError(null);
+                    setMessage(null);
+                  }}
+                  className="font-medium text-indigo-600 hover:text-indigo-500 ml-1"
+                >
+                  {isLogin ? "Sign Up" : "Log In"}
+                </button>
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      /**
+       * Header for the authenticated user
+       */
+      function AuthedHeader({ handleLogout, userEmail }) {
+        return (
+          <header className="bg-white shadow-sm">
+            <nav className="container mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex justify-between items-center h-16">
+                {/* Logo/Brand Name */}
+                <div className="flex-shrink-0 flex items-center">
+                  <span className="text-2xl font-bold text-indigo-600">
+                    NewsAI
+                  </span>
+                </div>
+
+                {/* User Info & Logout */}
+                <div className="flex items-center space-x-4">
+                  <span className="text-gray-600 text-sm hidden sm:block">
+                    {userEmail}
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    className="text-gray-600 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium"
+                  >
+                    Log Out
+                  </button>
+                </div>
+              </div>
+            </nav>
+          </header>
+        );
+      }
+
+      /**
+       * --- NEW COMPONENT ---
+       * This component lets a new user select their initial topics.
+       */
+      function TopicSelection({ authToken, onTopicsSaved }) {
+        const [allTopics, setAllTopics] = useState([]);
+        const [selectedTopicIds, setSelectedTopicIds] = useState(new Set());
+        const [isLoading, setIsLoading] = useState(true);
+        const [isSaving, setIsSaving] = useState(false);
+        const [error, setError] = useState(null);
+
+        // Fetch all available topics on component mount
+        useEffect(() => {
+          const fetchTopics = async () => {
+            setIsLoading(true);
+            setError(null);
+            try {
+              const response = await fetch(`${API_URL}/topics`, {
+                headers: {
+                  Authorization: `Bearer ${authToken}`,
+                },
+              });
+              if (!response.ok) {
+                throw new Error("Failed to fetch topics. Please try again.");
+              }
+              const data = await response.json();
+              setAllTopics(data);
+            } catch (err) {
+              setError(err.message);
+            } finally {
+              setIsLoading(false);
+            }
+          };
+          fetchTopics();
+        }, [authToken]);
+
+        // Toggle a topic in the 'selectedTopicIds' Set
+        const handleTopicToggle = (topicId) => {
+          setSelectedTopicIds((prevIds) => {
+            const newIds = new Set(prevIds);
+            if (newIds.has(topicId)) {
+              newIds.delete(topicId);
+            } else {
+              newIds.add(topicId);
+            }
+            return newIds;
+          });
+        };
+
+        // Save the selected topics
+        const handleSave = async () => {
+          setIsSaving(true);
+          setError(null);
+          try {
+            const response = await fetch(`${API_URL}/users/me/topics`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${authToken}`,
+                "Content-Type": "application/json",
+              },
+              // Convert the Set to an Array for the JSON body
+              body: JSON.stringify(Array.from(selectedTopicIds)),
+            });
+
+            if (!response.ok) {
+              const data = await response.json();
+              throw new Error(data.detail || "Failed to save topics.");
+            }
+
+            // On success, call the callback to refresh the user
+            onTopicsSaved();
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setIsSaving(false);
+          }
+        };
+
+        if (isLoading) {
+          return <PageSpinner />;
+        }
+
+        return (
+          <div className="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-lg">
+            <h2 className="text-3xl font-bold text-center text-gray-900 mb-4">
+              What interests you?
+            </h2>
+            <p className="text-center text-gray-600 mb-8">
+              Select a few topics to personalize your news feed. You can change
+              these later.
+            </p>
+
+            {error && (
+              <div
+                className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md mb-6"
+                role="alert"
+              >
+                <span className="block sm:inline">{error}</span>
+              </div>
+            )}
+
+            {/* Topic Buttons */}
+            <div className="flex flex-wrap gap-3 justify-center mb-8">
+              {allTopics.map((topic) => {
+                const isSelected = selectedTopicIds.has(topic.id);
+                return (
+                  <button
+                    key={topic.id}
+                    onClick={() => handleTopicToggle(topic.id)}
+                    className={`
+                                      px-5 py-2 rounded-full font-medium text-sm transition-all
+                                      ${
+                                        isSelected
+                                          ? "bg-indigo-600 text-white shadow"
+                                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                      }
+                                  `}
+                  >
+                    {topic.name}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Save Button */}
+            <button
+              onClick={handleSave}
+              disabled={isSaving || selectedTopicIds.size === 0}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-md shadow-lg flex items-center justify-center disabled:bg-indigo-400 disabled:cursor-not-allowed transition duration-300"
+            >
+              {isSaving ? (
+                <Spinner />
+              ) : (
+                `Save and Continue (${selectedTopicIds.size})`
+              )}
+            </button>
+          </div>
+        );
+      }
+
+      /**
+       * Placeholder for the authenticated app (e.g., feed, topics)
+       */
+      function AuthenticatedApp({
+        user,
+        handleLogout,
+        authToken,
+        refreshUser,
+      }) {
+        // Check if user has selected topics
+        const isNewUser = user.topics && user.topics.length === 0;
+
+        return (
+          <div className="flex-grow container mx-auto p-4 sm:p-8">
+            {isNewUser ? (
+              // --- Show Topic Selection for New Users ---
+              <TopicSelection
+                authToken={authToken}
+                onTopicsSaved={refreshUser}
+              />
+            ) : (
+              // --- Show News Feed for Returning Users ---
+              <div className="text-center bg-white p-8 rounded-lg shadow">
+                <h2 className="text-2xl font-semibold mb-4">
+                  Welcome back, {user.email}!
+                </h2>
+                <p className="text-gray-700">
+                  You have {user.topics.length} topics selected.
+                </p>
+                {/* TODO: In the next step, you would fetch /feed
+                              and render the news feed component here.
+                          */}
+                <div className="mt-6 p-4 bg-gray-100 rounded-md">
+                  <p className="font-mono text-sm">
+                    [Next Step: NewsFeed component will go here]
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      /**
+       * The Main Application Component
+       */
+      function App() {
+        // 'landing', 'login', 'signup'
+        const [view, setView] = useState("landing");
+
+        const [authToken, setAuthTokenState] = useState(() =>
+          localStorage.getItem("authToken")
+        );
+
+        const [user, setUser] = useState(null);
+        const [isLoadingUser, setIsLoadingUser] = useState(true); // Start true on first load
+        const [authError, setAuthError] = useState(null);
+
+        const setAuthToken = (token) => {
+          if (token) {
+            localStorage.setItem("authToken", token);
+          } else {
+            localStorage.removeItem("authToken");
+          }
+          setAuthTokenState(token);
+        };
+
+        // --- MODIFIED ---
+        // We wrap fetchUser in useCallback so we can pass it
+        // down as a prop ('refreshUser') without causing
+        // infinite loops in components that receive it.
+        const fetchUser = useCallback(async () => {
+          if (!authToken) {
+            setIsLoadingUser(false);
+            setUser(null);
+            return;
+          }
+
+          setIsLoadingUser(true);
+          setAuthError(null);
+          try {
+            const response = await fetch(`${API_URL}/users/me`, {
+              headers: {
+                Authorization: `Bearer ${authToken}`,
+              },
+            });
+
+            if (!response.ok) {
+              throw new Error("Session expired. Please log in again.");
+            }
+
+            const userData = await response.json();
+            setUser(userData);
+          } catch (err) {
+            setAuthError(err.message);
+            setAuthToken(null);
+            setUser(null);
+            setView("login");
+          } finally {
+            setIsLoadingUser(false);
+          }
+        }, [authToken]); // This function depends on 'authToken'
+
+        // Effect to fetch user data on initial load or token change
+        useEffect(() => {
+          fetchUser();
+        }, [fetchUser]); // This effect now depends on the memoized fetchUser
+
+        const handleLogout = () => {
+          setAuthToken(null);
+          setUser(null);
+          setView("landing");
+        };
+
+        // Main Render Logic
+        return (
+          <div className="flex flex-col min-h-screen">
+            {authError && (
+              <div className="bg-red-600 text-white p-3 text-center">
+                {authError}
+              </div>
+            )}
+
+            {isLoadingUser ? (
+              <PageSpinner />
+            ) : user ? (
+              // --- Authenticated State ---
+              <Fragment>
+                <AuthedHeader
+                  handleLogout={handleLogout}
+                  userEmail={user.email}
+                />
+                <AuthenticatedApp
+                  user={user}
+                  handleLogout={handleLogout}
+                  authToken={authToken}
+                  refreshUser={fetchUser} // Pass the function
+                />
+              </Fragment>
+            ) : (
+              // --- Public (Logged-Out) State ---
+              <Fragment>
+                <PublicHeader setView={setView} />
+                {view === "landing" && <HeroSection setView={setView} />}
+                {(view === "login" || view === "signup") && (
+                  <AuthForm
+                    mode={view}
+                    setAuthToken={setAuthToken}
+                    setView={setView}
+                  />
+                )}
+              </Fragment>
+            )}
+          </div>
+        );
+      }
+
+      // --- Mount the App ---
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

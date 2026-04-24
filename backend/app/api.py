@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 from typing import Dict, List
-from . import models, schemas, auth, db, news_fetcher, tasks, ingestion_service # Import all services
+from . import models, schemas, auth, db, news_fetcher, ingestion_service # Import all services
 from .config import settings
 from .db import get_db # Import get_db
 from .ranking import (
@@ -278,6 +278,8 @@ def fetch_and_process_articles(
         )
 
     if settings.ENABLE_ASYNC_INGESTION:
+        from . import tasks
+
         run = ingestion_service.create_ingestion_run(
             db_session=db_session,
             topic_ids=topic_ids_to_process,
@@ -421,6 +423,8 @@ def run_active_topic_ingestion(
     )
 
     if settings.ENABLE_ASYNC_INGESTION:
+        from . import tasks
+
         try:
             async_result = tasks.process_ingestion_run.delay(
                 run.run_id,

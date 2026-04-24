@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# Worker/queue runtime dependencies (non-serverless)
+celery==5.4.0
+redis==5.0.7
+
+# Optional local-model stack
+transformers==4.40.1
+torch
+numpy

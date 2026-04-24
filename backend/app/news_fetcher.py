@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 from typing import Any, Dict, List
 
 import dateparser
@@ -6,6 +7,9 @@ from serpapi import GoogleSearch
 
 from .config import settings
 from .discovery import discover_topic_urls
+
+
+logger = logging.getLogger(__name__)
 
 
 def parse_date(date_string: str) -> datetime:
@@ -23,10 +27,10 @@ def fetch_articles_for_topic(topic_name: str, max_articles: int = 20) -> List[Di
     Fetches discovered and deduped article metadata for one topic.
     """
     if not settings.SERPAPI_API_KEY:
-        print("Error: SERPAPI_API_KEY is not set. Cannot fetch articles.")
+        logger.error("SERPAPI_API_KEY is not set. Cannot fetch topic articles.")
         return []
 
-    print(f"Fetching articles for topic: {topic_name}...")
+    logger.info("Fetching articles for topic '%s' (limit=%s)", topic_name, max_articles)
     try:
         discovered_articles = discover_topic_urls(topic_name=topic_name, max_articles=max_articles)
         cleaned_articles: List[Dict[str, Any]] = []
@@ -50,10 +54,15 @@ def fetch_articles_for_topic(topic_name: str, max_articles: int = 20) -> List[Di
                 }
             )
 
-        print(f"Successfully fetched {len(cleaned_articles)} articles for {topic_name}.")
+        logger.info(
+            "Discovery complete for topic '%s': discovered=%s, cleaned=%s",
+            topic_name,
+            len(discovered_articles),
+            len(cleaned_articles),
+        )
         return cleaned_articles
     except Exception as exc:
-        print(f"Error fetching or parsing SerpApi data: {exc}")
+        logger.exception("Error fetching/parsing SerpApi data for topic '%s': %s", topic_name, exc)
         return []
 
 
@@ -62,10 +71,10 @@ def fetch_top_stories(max_articles: int = 10) -> List[Dict[str, Any]]:
     Fetches Google News top stories (no explicit query term).
     """
     if not settings.SERPAPI_API_KEY:
-        print("Error: SERPAPI_API_KEY is not set. Cannot fetch top stories.")
+        logger.error("SERPAPI_API_KEY is not set. Cannot fetch top stories.")
         return []
 
-    print("Fetching LIVE Top Stories (no query)...")
+    logger.info("Fetching top stories (limit=%s)", max_articles)
     params = {
         "engine": "google_news",
         "num": max_articles,
@@ -75,6 +84,10 @@ def fetch_top_stories(max_articles: int = 10) -> List[Dict[str, Any]]:
     try:
         search = GoogleSearch(params)
         results = search.get_dict()
+        if "error" in results:
+            logger.error("SerpApi returned error for top stories: %s", results.get("error"))
+            return []
+
         api_articles = results.get("news_results", [])
         if len(api_articles) > max_articles:
             api_articles = api_articles[:max_articles]
@@ -102,10 +115,10 @@ def fetch_top_stories(max_articles: int = 10) -> List[Dict[str, Any]]:
                 }
             )
 
-        print(f"Successfully fetched {len(cleaned_articles)} top stories.")
+        logger.info("Top stories fetch completed: cleaned=%s", len(cleaned_articles))
         return cleaned_articles
     except Exception as exc:
-        print(f"Error fetching or parsing SerpApi data for Top Stories: {exc}")
+        logger.exception("Error fetching/parsing SerpApi data for top stories: %s", exc)
         return []
 
 

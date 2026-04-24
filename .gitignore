@@ -21,3 +21,10 @@ backend/.env
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Celery beat runtime state
+celerybeat-schedule*
+backend/celerybeat-schedule*
+
+# Local dev orchestrator logs
+.run-dev-logs/

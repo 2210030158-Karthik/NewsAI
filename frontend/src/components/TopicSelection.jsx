@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'http://127.0.0.1:8011';
 
 // The "export" keyword here is what fixes the error
 export function TopicSelection({ token, onTopicsSaved }) {
@@ -10,7 +10,6 @@ export function TopicSelection({ token, onTopicsSaved }) {
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch all available topics when the component loads
   useEffect(() => {
     const fetchAllTopics = async () => {
       setIsLoading(true);
@@ -33,9 +32,8 @@ export function TopicSelection({ token, onTopicsSaved }) {
     fetchAllTopics();
   }, [token]);
 
-  // Handle topic click
   const toggleTopic = (topicId) => {
-    setSelectedTopicIds(prevSelected => {
+    setSelectedTopicIds((prevSelected) => {
       const newSelected = new Set(prevSelected);
       if (newSelected.has(topicId)) {
         newSelected.delete(topicId);
@@ -46,7 +44,6 @@ export function TopicSelection({ token, onTopicsSaved }) {
     });
   };
 
-  // Handle saving the new topic selection
   const handleSaveTopics = async () => {
     setIsSaving(true);
     setError('');
@@ -55,15 +52,15 @@ export function TopicSelection({ token, onTopicsSaved }) {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify(Array.from(selectedTopicIds))
+        body: JSON.stringify(Array.from(selectedTopicIds)),
       });
       if (!response.ok) {
         throw new Error('Failed to save your topics.');
       }
       const updatedUser = await response.json();
-      onTopicsSaved(updatedUser); // This tells App.jsx we're done
+      onTopicsSaved(updatedUser);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -76,17 +73,22 @@ export function TopicSelection({ token, onTopicsSaved }) {
   }
 
   return (
-    <div className="card">
-      <h2 className="form-title">Welcome to NewsAI!</h2>
-      <p className="form-subtitle">Please select a few topics to personalize your feed.</p>
-      
+    <section className="topic-selection-wrap">
+      <div className="topic-selection-head">
+        <p className="eyebrow">Onboarding</p>
+        <h2>Pick your coverage beats</h2>
+        <p>
+          Choose at least one topic. We will use these signals to build your first personalized brief.
+        </p>
+      </div>
+
       {error && <p className="error-message">{error}</p>}
-      
-      <div className="topic-grid">
-        {allTopics.map(topic => (
+
+      <div className="topic-grid enhanced">
+        {allTopics.map((topic) => (
           <button
             key={topic.id}
-            className="topic-button"
+            className="topic-chip"
             data-selected={selectedTopicIds.has(topic.id)}
             onClick={() => toggleTopic(topic.id)}
           >
@@ -94,15 +96,19 @@ export function TopicSelection({ token, onTopicsSaved }) {
           </button>
         ))}
       </div>
-      
-      <button 
-        className="button-primary" 
-        style={{width: '100%', marginTop: '1.5rem'}}
+
+      <div className="selection-footer">
+        <span>{selectedTopicIds.size} selected</span>
+      </div>
+
+      <button
+        className="button-primary"
+        style={{ width: '100%' }}
         onClick={handleSaveTopics}
         disabled={isSaving || selectedTopicIds.size === 0}
       >
-        {isSaving ? <span className="button-spinner-light"></span> : 'Save and Continue'}
+        {isSaving ? 'Saving...' : 'Save and Continue'}
       </button>
-    </div>
+    </section>
   );
 }

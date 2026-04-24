@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'http://127.0.0.1:8011';
 
-// This is the new component to edit topics "inline"
 export function TopicEditor({ token, currentUser, onSave, onCancel }) {
   const [allTopics, setAllTopics] = useState([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState(
-    // Initialize with the user's current topics
-    new Set(currentUser.topics.map(t => t.id))
+    new Set(currentUser.topics.map((topic) => topic.id))
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch all available topics when the component loads
   useEffect(() => {
     const fetchAllTopics = async () => {
       setIsLoading(true);
@@ -36,9 +33,8 @@ export function TopicEditor({ token, currentUser, onSave, onCancel }) {
     fetchAllTopics();
   }, [token]);
 
-  // Handle topic click
   const toggleTopic = (topicId) => {
-    setSelectedTopicIds(prevSelected => {
+    setSelectedTopicIds((prevSelected) => {
       const newSelected = new Set(prevSelected);
       if (newSelected.has(topicId)) {
         newSelected.delete(topicId);
@@ -49,7 +45,6 @@ export function TopicEditor({ token, currentUser, onSave, onCancel }) {
     });
   };
 
-  // Handle saving the new topic selection
   const handleSaveChanges = async () => {
     setIsSaving(true);
     setError('');
@@ -58,17 +53,16 @@ export function TopicEditor({ token, currentUser, onSave, onCancel }) {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify(Array.from(selectedTopicIds))
+        body: JSON.stringify(Array.from(selectedTopicIds)),
       });
       if (!response.ok) {
         throw new Error('Failed to save your topics.');
       }
       const updatedUser = await response.json();
-      
-      // This calls 'handleTopicsUpdated' in NewsFeed.jsx
-      onSave(updatedUser); 
+
+      onSave(updatedUser);
 
     } catch (err) {
       setError(err.message);
@@ -78,21 +72,24 @@ export function TopicEditor({ token, currentUser, onSave, onCancel }) {
   };
 
   if (isLoading) {
-    return <div className="loading-spinner" style={{margin: '3rem auto'}}></div>;
+    return <div className="loading-spinner" style={{ margin: '3rem auto' }}></div>;
   }
 
   return (
-    <div className="card" style={{ maxWidth: '100%', marginTop: 0 }}>
-      <h3 className="form-title">Edit Your Topics</h3>
-      <p className="form-subtitle">Select the topics you're interested in.</p>
-      
+    <section className="topic-editor-card">
+      <div className="topic-selection-head compact">
+        <p className="eyebrow">Preferences</p>
+        <h3>Refine your topics</h3>
+        <p>Select and deselect to tune your briefing priorities.</p>
+      </div>
+
       {error && <p className="error-message">{error}</p>}
-      
-      <div className="topic-grid">
-        {allTopics.map(topic => (
+
+      <div className="topic-grid enhanced">
+        {allTopics.map((topic) => (
           <button
             key={topic.id}
-            className="topic-button"
+            className="topic-chip"
             data-selected={selectedTopicIds.has(topic.id)}
             onClick={() => toggleTopic(topic.id)}
           >
@@ -100,23 +97,23 @@ export function TopicEditor({ token, currentUser, onSave, onCancel }) {
           </button>
         ))}
       </div>
-      
+
       <div className="topic-editor-actions">
-        <button 
-          className="button-secondary" 
+        <button
+          className="button-secondary"
           onClick={onCancel}
           disabled={isSaving}
         >
           Cancel
         </button>
-        <button 
-          className="button-primary" 
+        <button
+          className="button-primary"
           onClick={handleSaveChanges}
-          disabled={isSaving}
+          disabled={isSaving || selectedTopicIds.size === 0}
         >
-          {isSaving ? <span className="button-spinner-light"></span> : 'Apply Changes'}
+          {isSaving ? 'Saving...' : 'Apply Changes'}
         </button>
       </div>
-    </div>
+    </section>
   );
 }

@@ -3,7 +3,9 @@ from typing import Any, Dict, Optional
 
 import requests
 
-DEFAULT_TIMEOUT_SECONDS = 15
+from .config import settings
+
+DEFAULT_TIMEOUT_SECONDS = settings.SCRAPER_TIMEOUT_SECONDS
 MAX_HTML_CHARS = 2_000_000
 
 _DEFAULT_HEADERS = {

@@ -1,0 +1,849 @@
+AI NEWS AGGREGATOR
+A Project Report Submitted in partial fulfillment of the requirements for
+the award of the degree of
+BACHELOR OF TECHNOLOGY
+in
+COMPUTER SCIENCE AND ENGINEERING
+By
+D. Karthik Rao (2210030158)
+P. Leela Rishika (2210030195)
+B. Haricharan (2210030467)
+K. Poojitha (2210030123)
+
+DEPARTMENT OF
+COMPUTER SCIENCE AND ENGINEERING
+K L DEEMED TO BE UNIVERSITY
+AZIZNAGAR, MOINABAD, HYDERABAD-500 075
+NOVEMBER 2025
+
+-------------------------------------------------------------------------------
+i
+BONAFIDE CERTIFICATE
+
+This is to certify that the project titled AI NEWS AGGREGATOR is a bonafide
+record of the work done by
+
+D. Karthik Rao (2210030158)
+P. Leela Rishika (2210030195)
+B. Haricharan (2210030467)
+K. Poojitha (2210030123)
+
+in partial fulfillment of the requirements for the award of the degree of Bachelor
+of Technology in COMPUTER SCIENCE AND ENGINEERING of the K L DEEMED TO
+BE UNIVERSITY, AZIZNAGAR, MOINABAD, HYDERABAD-500 075,
+during the year 2025-2026.
+
+PROJECT GUIDE NAME                      HOD NAME
+Dr. Sai Sudha Gadde                    Dr. Arpita Gupta
+
+Project Viva-voce held on:
+
+Internal Examiner                      External Examiner
+
+-------------------------------------------------------------------------------
+ii
+ABSTRACT
+
+In the current digital ecosystem, users are exposed to a continuous stream of high-volume,
+mixed-quality information, resulting in severe information overload. Conventional news
+platforms provide broad personalization, but they often fail to capture nuanced user interests,
+adapt quickly to changing preferences, and maintain transparency in ranking behavior.
+
+This project, NewsAI, presents an end-to-end intelligent news platform that has evolved from
+an initial prototype (V1) into a significantly improved architecture (V2). The V2 system is
+built around asynchronous ingestion, local model-first intelligence, and dynamic user-centric
+ranking. The backend is implemented using FastAPI, PostgreSQL, SQLAlchemy, Celery, and
+Redis. The frontend is implemented as a React Single Page Application with Vite.
+
+A key technical advancement from V1 to V2 is the reduction of over-dependence on external
+API calls for intelligence workflows. In V1, model behavior was primarily API-centric. In V2,
+core classification and ranking logic are executed locally using Hugging Face transformer
+pipelines with fallback mechanisms. External APIs remain useful for selective data discovery,
+but they are no longer responsible for all intelligence operations.
+
+The ingestion pipeline now runs asynchronously and supports high-volume sweeps of active
+topics. During long ingestion runs, progress is persisted periodically to the database (every
+20 processed article URLs), improving observability and allowing users to monitor live run
+state. The feed layer now prioritizes freshness and relevance together, ensuring that newly
+fetched articles are surfaced while preserving personalization quality.
+
+The system includes secure JWT-based authentication, topic onboarding and editing, ad-hoc
+search, full-article in-app reader support, user feedback loops (like/dislike), and personalized
+report generation. Overall, NewsAI V2 demonstrates a scalable, resilient, and production-aware
+solution for personalized content delivery.
+
+-------------------------------------------------------------------------------
+iii
+ACKNOWLEDGEMENT
+
+We express our sincere gratitude to our project guide, Dr. Sai Sudha Gadde, for her
+continuous mentorship, valuable technical guidance, and unwavering encouragement
+throughout this project. Her insights and feedback were instrumental in refining both the
+engineering direction and academic quality of this work.
+
+We extend our heartfelt thanks to the Head of the Department of Computer Science and
+Engineering, Dr. Arpita Gupta, for her support and for creating an academically rigorous
+environment that enabled us to execute this project effectively.
+
+We also express our sincere appreciation to Dr. A. Rama Krishna, Principal of KL University,
+Aziznagar, for providing institutional support, resources, and a strong academic platform for
+innovation and project development.
+
+We thank the Department of Computer Science and Engineering, KL University, for providing
+the required infrastructure, laboratory support, and technical ecosystem necessary for the
+successful completion of this project.
+
+Finally, we thank our faculty members, peers, friends, and families for their encouragement,
+constructive suggestions, and constant support throughout every phase of this project.
+
+-------------------------------------------------------------------------------
+iv
+TABLE OF CONTENTS
+
+Title Page No.
+ABSTRACT .................................................................................................................. ii
+ACKNOWLEDGEMENT .......................................................................................... iii
+TABLE OF CONTENTS ............................................................................................ iv
+LIST OF TABLES ..................................................................................................... vii
+LIST OF FIGURES .................................................................................................. viii
+1 Introduction ............................................................................................................ 1
+1.1 Background of the Project .............................................................................. 1
+1.1.1 The Need for Intelligent Curation ...................................................... 2
+1.2 Problem Statement .......................................................................................... 2
+1.3 Objectives ....................................................................................................... 3
+1.4 Scope of the Project ........................................................................................ 4
+2 Literature Review ................................................................................................... 6
+2.1 Review of Existing Aggregation Platforms .......................................................... 6
+2.2 Core Technology: Text Classification in NLP ...................................................... 7
+2.3 Comparative Analysis of Existing Systems .......................................................... 8
+2.4 Advantages and Limitations of Existing Systems ............................................... 9
+3 Proposed System ................................................................................................... 10
+3.1 System Requirements ..................................................................................... 10
+3.1.1 Functional Requirements .................................................................. 10
+3.1.2 Non-Functional Requirements .......................................................... 11
+3.2 Design of the System ...................................................................................... 12
+3.2.1 System Architecture ......................................................................... 12
+3.2.2 Database Schema Design ................................................................ 13
+3.3 Algorithms and Techniques Used ................................................................... 14
+3.3.1 Algorithm: Asynchronous Topic Sweep and Processing ................. 14
+3.3.2 Algorithm: Freshness + Relevance Feed Generation ....................... 15
+4 Implementation ...................................................................................................... 17
+4.1 Tools and Technologies Used ......................................................................... 17
+4.1.1 Backend Technologies ...................................................................... 17
+4.1.2 Frontend Technologies ..................................................................... 18
+4.1.3 AI and Data Services ........................................................................ 18
+4.2 Modules and Their Descriptions ..................................................................... 19
+4.2.1 Backend Module Descriptions .......................................................... 19
+4.2.2 Frontend Module Descriptions ......................................................... 21
+4.3 Flow of the System ........................................................................................ 22
+4.3.1 New User Registration and Onboarding Flow ................................. 22
+4.3.2 Returning User and Feed Generation Flow ...................................... 23
+5 Results and Analysis ............................................................................................. 25
+5.1 Performance Evaluation ................................................................................. 25
+5.1.1 Version 1 Bottlenecks and Version 2 Improvements ....................... 25
+5.1.2 Async Progress Tracking and Operational Visibility ......................... 26
+5.2 Comparison with Existing Systems ................................................................. 27
+5.3 Limitations and Future Scope ......................................................................... 28
+5.3.1 Limitations of the Current System .................................................... 28
+5.3.2 Recommendations for Future Scope ................................................. 29
+6 Conclusion and Recommendations ..................................................................... 31
+6.1 Summary of the Project ................................................................................. 31
+6.2 Contributions and Achievements ................................................................... 31
+6.3 Recommendations for Future Work ............................................................... 32
+Bibliography .............................................................................................................. 34
+Appendices ................................................................................................................ 36
+A Source Code ........................................................................................................... 37
+B Screen Shots .......................................................................................................... 47
+
+-------------------------------------------------------------------------------
+vii
+List of Tables
+
+2.1 Comparative Analysis of News Aggregation Systems ................................... 8
+5.1 Version 1 vs Version 2 System Comparison ................................................. 27
+
+-------------------------------------------------------------------------------
+viii
+List of Figures
+
+2.1 Screenshot of Google News ............................................................................ 6
+2.2 Topic Classification Flowchart ........................................................................ 7
+3.1 High-Level System Architecture of NewsAI V2 ............................................ 12
+5.1 Refresh and Processing Improvement Trend ............................................... 26
+B.1 Screen Shots .................................................................................................. 47
+
+-------------------------------------------------------------------------------
+Chapter 1
+Introduction
+
+1.1 Background of the Project
+
+In the modern digital age, users face a continuous and growing challenge: information
+overload. News content is generated at high frequency across thousands of digital sources,
+and users are expected to manually identify what is trustworthy, relevant, and timely.
+Traditional aggregation interfaces reduce discovery effort but still struggle to deliver
+high-precision personalization for individual interests.
+
+Most existing systems rely on broad category grouping and opaque ranking logic. As a result,
+users receive a generic stream of stories that may not align with their actual priorities.
+This gap is particularly visible for users with focused interests, such as AI policy, startup
+funding ecosystems, or semiconductor market trends, where broad categories like "Technology"
+are insufficient.
+
+NewsAI was initiated to solve this gap through AI-assisted curation and user-driven control.
+The first version validated the core concept. Version 2 transforms the project into a more
+scalable and robust architecture by introducing asynchronous processing, richer extraction,
+feedback-aware ranking, and local model-first intelligence.
+
+1.1.1 The Need for Intelligent Curation
+
+Modern curation systems must satisfy three requirements simultaneously:
+
+1. High relevance at the individual level.
+2. High freshness so newly fetched stories are visible quickly.
+3. High transparency so users understand why stories appear.
+
+NewsAI V2 addresses these requirements with a freshness-plus-relevance ranking strategy,
+user-controlled topic selection, and explicit run-level ingestion metrics. This provides a
+more actionable and trustworthy user experience than purely black-box feed systems.
+
+1.2 Problem Statement
+
+The project addresses five major technical and user-experience problems:
+
+1. Information Overload:
+Users are exposed to large volumes of low-relevance content, causing cognitive fatigue.
+
+2. Lack of Granularity:
+Traditional personalization is broad and fails to capture nuanced interests.
+
+3. Static or Opaque Ranking:
+Many systems do not expose how ranking decisions are made, and users have limited influence
+on feed adaptation.
+
+4. API Dependence for Intelligence:
+In V1-style systems, over-reliance on external APIs for model behavior creates latency,
+cost unpredictability, and resilience risk.
+
+5. Inefficient Processing Pipelines:
+Synchronous or non-targeted processing can become a scalability bottleneck under larger topic
+sets and frequent refresh requests.
+
+1.3 Objectives
+
+The project objectives for Version 2 are:
+
+- Build a secure, scalable full-stack platform for personalized news delivery.
+- Implement asynchronous ingestion with queue-backed orchestration.
+- Reduce model dependency on external APIs by executing core classification logic locally.
+- Improve feed quality through freshness-aware and feedback-aware ranking.
+- Enable full-article in-app reading through extraction and hydration workflows.
+- Provide run observability through ingestion status endpoints and checkpoint updates.
+- Support large active-topic sweeps (up to 250 topics) in a controlled, monitorable manner.
+
+1.4 Scope of the Project
+
+In-Scope:
+
+- JWT-based user signup, login, and protected endpoints.
+- Initial topic onboarding and dynamic topic editing.
+- Live article discovery from external source APIs.
+- Asynchronous ingestion runs using Celery and Redis.
+- Local model-based topic classification with fallback strategy.
+- Freshness-plus-relevance personalized feed generation.
+- In-app full-content reader with refresh-if-missing hydration endpoint.
+- Like/dislike feedback capture and preference profile updates.
+- Personalized report generation and retrieval endpoints.
+- Admin-triggered active-topic sweep endpoint.
+- Ingestion progress persistence checkpoints during long runs.
+
+Out-of-Scope:
+
+- Native Android/iOS application development.
+- Multi-user social interactions (comments, shares, community threads).
+- Full editorial moderation dashboard and newsroom CMS tooling.
+- Custom training pipeline for foundation model pre-training.
+
+-------------------------------------------------------------------------------
+Chapter 2
+Literature Review
+
+2.1 Review of Existing Aggregation Platforms
+
+Existing news aggregation systems broadly fall into two models:
+
+1. Algorithmic Aggregators (for example, Google News):
+These systems are effective at large-scale source clustering and trend surfacing, but user
+control is usually limited and personalization logic is largely opaque.
+
+2. Community-Curated Aggregators (for example, Reddit-like structures):
+These systems provide high user agency through communities, but quality consistency and
+signal-to-noise ratio vary significantly.
+
+Both models demonstrate useful strengths but leave a practical gap for users who need
+highly specific, low-noise, dynamically adaptive feeds.
+
+Figure 2.1: Screenshot of Google News
+
+2.2 Core Technology: Text Classification in NLP
+
+Text classification has evolved from classical methods (Naive Bayes, SVM) to transformer-
+based methods that capture semantic context. For this project, zero-shot and local-model
+classification approaches are central.
+
+In V1, the system depended heavily on API-driven inference. In V2, the classifier module
+supports local model resolution and runtime fallback strategies. This local-first approach
+improves resilience and reduces dependence on external model services for core ranking and
+classification decisions.
+
+Figure 2.2: Topic Classification Flowchart
+
+2.3 Comparative Analysis of Existing Systems
+
+Table 2.1: Comparative Analysis of News Aggregation Systems
+
+Feature | Traditional Aggregators | Social Curation | NewsAI V2
+------- | ----------------------- | --------------- | ---------
+Personalization | Broad and opaque | User-driven communities | Fine-grained, user-configurable, model-assisted
+User Control | Limited | High | High
+Noise Control | Moderate to high | Variable | High with filtering and scoring
+Scalability | High | High | High with async queue architecture
+Model Transparency | Low | N/A | Medium to high (configurable logic + explicit signals)
+Freshness Control | Platform-managed | Community-dependent | Freshness-first feed sorting
+
+2.4 Advantages and Limitations of Existing Systems
+
+Advantages of existing systems:
+- Proven content discovery scale.
+- Strong source breadth and timeliness.
+
+Limitations:
+- Limited user-control granularity.
+- Weak explainability for personalization outcomes.
+- Either low control (algorithmic) or high noise (community-curated).
+
+NewsAI V2 addresses this by combining external discovery with internal intelligence, user
+control, and asynchronous processing.
+
+-------------------------------------------------------------------------------
+Chapter 3
+Proposed System
+
+3.1 System Requirements
+
+3.1.1 Functional Requirements
+
+The proposed system must:
+
+- Authenticate users securely and protect sensitive API routes.
+- Allow users to select and edit topic preferences.
+- Discover relevant live articles from external sources.
+- Classify and score article-topic relevance.
+- Persist full ingestion and run metrics in PostgreSQL.
+- Provide personalized feed delivery with freshness and relevance.
+- Provide in-app full-content reading with content hydration.
+- Support feedback capture (like/dislike) and preference updates.
+- Generate personalized reports from user behavior and content profile.
+- Support admin-triggered active-topic ingestion sweeps.
+
+3.1.2 Non-Functional Requirements
+
+The proposed system must ensure:
+
+- Performance: non-blocking ingestion through worker queues.
+- Reliability: graceful fallback in model and queue-dependent components.
+- Security: password hashing and JWT token enforcement.
+- Maintainability: modular backend and frontend code structure.
+- Observability: visible ingestion run states and counters.
+- Scalability: topic-batch and periodic sweep compatibility.
+
+3.2 Design of the System
+
+3.2.1 System Architecture
+
+NewsAI V2 uses a distributed but lightweight architecture:
+
+1. Frontend Layer (React + Vite):
+Provides onboarding, feed, search, in-app reader, report view, and ingestion run monitoring.
+
+2. API Layer (FastAPI):
+Handles authentication, feed endpoints, feedback capture, report generation, and ingestion
+orchestration APIs.
+
+3. Worker Layer (Celery):
+Processes ingestion runs asynchronously (discovery, scraping, extraction, classification,
+persistence).
+
+4. Queue and Scheduler (Redis + Celery Beat):
+Supports scheduled ingestion and decoupled execution.
+
+5. Persistence Layer (PostgreSQL + SQLAlchemy):
+Stores users, topics, articles, scores, feedback, profiles, reports, run metrics, and errors.
+
+Figure 3.1: High-Level System Architecture of NewsAI V2
+
+3.2.2 Database Schema Design
+
+The V2 schema extends beyond basic user-topic-article storage and supports operational
+intelligence:
+
+- users
+- topics
+- articles
+- sources
+- article_topic_scores
+- user_feedback
+- user_preference_profiles
+- personalized_reports
+- ingestion_runs
+- ingestion_errors
+
+Compared to V1, V2 explicitly models ingestion lifecycle and feedback learning, enabling
+robust monitoring and adaptive ranking.
+
+3.3 Algorithms and Techniques used
+
+3.3.1 Algorithm: Asynchronous Topic Sweep and Processing
+
+1. API receives ingestion request (manual or scheduled trigger).
+2. API creates an ingestion run record with status queued.
+3. Celery task process_ingestion_run is enqueued with topic_ids and limits.
+4. Worker loads topics and discovers URLs per topic.
+5. For each URL, the worker:
+   - checks if article exists,
+   - enriches existing article or creates new article,
+   - extracts content and metadata,
+   - classifies topic relevance,
+   - persists article-topic scores.
+6. Every 20 processed article URLs, run counters are persisted to DB as checkpoints.
+7. Final run summary (discovered/scraped/success/fail) is committed with completed status.
+
+3.3.2 Algorithm: Freshness + Relevance Feed Generation
+
+1. API authenticates current user and loads selected topics.
+2. Candidate articles are fetched by topic links, ordered by fetched_at and published_at.
+3. Feedback and preference profile weights are loaded.
+4. A ranking score is computed per article using:
+   - topic match score,
+   - topic preference weight,
+   - source preference weight,
+   - feedback boost/penalty,
+   - recency component.
+5. Final feed is sorted by freshness first, then ranking score, then publication time.
+6. API returns top personalized feed items.
+
+-------------------------------------------------------------------------------
+Chapter 4
+Implementation
+
+4.1 Tools and Technologies used
+
+4.1.1 Backend Technologies
+
+- Python 3.11
+- FastAPI
+- SQLAlchemy
+- PostgreSQL
+- Pydantic and Pydantic Settings
+- Celery
+- Redis
+- Passlib and python-jose
+- Uvicorn
+
+4.1.2 Frontend Technologies
+
+- React
+- Vite
+- JavaScript (ES6+)
+- CSS3
+
+4.1.3 AI and Data Services
+
+- Hugging Face Transformers
+- Local classifier model path with fallback logic
+- SerpApi for live external news discovery
+
+4.2 Modules and their descriptions
+
+4.2.1 Backend Module Descriptions
+
+- main.py: FastAPI application bootstrap and middleware setup.
+- api.py: Core API routes for feed, ingestion, reports, feedback, and full-content.
+- models.py: SQLAlchemy data model definitions.
+- schemas.py: Pydantic request/response contracts.
+- db.py: Database engine and session management.
+- auth.py: JWT and password security.
+- discovery.py: URL discovery and canonicalization.
+- news_fetcher.py: Topic query to cleaned discovery payload.
+- scraper.py: HTML retrieval with timeout and metadata capture.
+- content_extractor.py: Extraction and fallback content parsing.
+- classifier.py: Local/remote model abstraction and fallback classification.
+- ranking.py: Feedback and recency-aware ranking utilities.
+- ingestion_service.py: Ingestion orchestration and run checkpoint persistence.
+- tasks.py: Celery task entry points for run execution and scheduler enqueueing.
+
+4.2.2 Frontend Module Descriptions
+
+- App.jsx: top-level auth/view orchestration.
+- AuthForm.jsx: signup/login workflow.
+- LandingPage.jsx: unauthenticated entry UX.
+- TopicSelection.jsx: first-time topic onboarding.
+- TopicEditor.jsx: topic preference modification.
+- NewsFeed.jsx: feed rendering, refresh, admin sweep, feedback, search, run polling,
+  reports, in-app reader.
+
+4.3 Flow of the System
+
+4.3.1 New User Registration and Onboarding Flow
+
+1. User accesses landing page.
+2. User signs up or logs in.
+3. API returns JWT.
+4. Frontend loads /users/me.
+5. If no topics selected, onboarding topic selection is shown.
+6. Selected topic IDs are posted and persisted.
+7. User is redirected to personalized newsroom feed.
+
+4.3.2 Returning User and Feed Generation Flow
+
+1. Frontend restores stored token.
+2. API validates token and returns user profile.
+3. Feed endpoint returns freshness-plus-relevance ranked items.
+4. User can trigger:
+   - targeted refresh for own topics,
+   - admin 250-topic sweep (authorized path),
+   - report generation,
+   - in-app full-content reading,
+   - feedback updates.
+5. Ingestion run statuses are polled and displayed live.
+
+-------------------------------------------------------------------------------
+Chapter 5
+Results and Analysis
+
+5.1 Performance Evaluation
+
+5.1.1 Version 1 Bottlenecks and Version 2 Improvements
+
+Version 1 encountered processing bottlenecks due to less scalable ingestion and broad
+processing paths. Version 2 introduced asynchronous queue-backed ingestion with targeted
+runs and scheduler-driven execution.
+
+Observed run summaries from V2 logs demonstrate stable completion and meaningful throughput,
+for example:
+- topics_total=5, urls_discovered=50, urls_scraped=24, success_count=50, fail_count=0
+- topics_total=3, urls_discovered=30, urls_scraped=7, success_count=30, fail_count=0
+
+This reflects reliable run completion with explicit metrics and no request-path blocking.
+
+5.1.2 Async Progress Tracking and Operational Visibility
+
+A major V2 addition is periodic run checkpoint persistence. During longer sweeps, ingestion
+counters are committed every 20 processed URLs. This allows near-live visibility from
+/ingestion/runs and supports operational monitoring while jobs are still running.
+
+Figure 5.1: Refresh and Processing Improvement Trend
+
+5.2 Comparison with existing systems
+
+Table 5.1: Version 1 vs Version 2 System Comparison
+
+Criteria | Version 1 | Version 2
+-------- | --------- | ---------
+Ingestion Model | Partially synchronous/limited async | Full async queue with Celery + Redis
+Model Strategy | API-heavy for intelligence | Local model-first with fallback
+Feed Ranking | Basic relevance/recency | Freshness-first + feedback-aware relevance
+Run Visibility | Limited | Explicit run states and counters
+Large Batch Support | Limited | Active-topic sweep up to 250 batch size
+Reader Experience | Redirect-centric | In-app full-content reader with hydration
+
+5.3 Limitations and future scope
+
+5.3.1 Limitations of the Current System
+
+- Some source domains return anti-bot or captcha pages, reducing extraction quality.
+- Local model cold-start can add initial run latency.
+- Source reliability scoring is currently basic and can be expanded.
+- User-level explainability UI can be improved further.
+
+5.3.2 Recommendations for Future Scope
+
+- Add source-block handling and adaptive retry/downrank policies.
+- Introduce richer rank explainability per article.
+- Add stale-run auto-recovery and timeout-based run sanitization.
+- Improve local model benchmarking and automatic model selection.
+- Introduce configurable freshness windows by user preference.
+
+-------------------------------------------------------------------------------
+Chapter 6
+Conclusion and Recommendations
+
+6.1 Summary of the Project
+
+NewsAI V2 successfully extends the original concept into a scalable, resilient, and
+production-aware personalized news platform. The system now combines asynchronous ingestion,
+local intelligence, dynamic user feedback adaptation, and improved content accessibility.
+
+6.2 Contributions and achievements
+
+Major contributions include:
+
+1. Migration from API-heavy intelligence to local model-first processing for core tasks.
+2. Queue-backed asynchronous ingestion and scheduler-enabled sweeps.
+3. Checkpoint-based ingestion progress persistence for long-running jobs.
+4. Freshness-first feed ranking with relevance and feedback signals.
+5. Full-content in-app reader and hydration endpoint.
+6. Stronger runtime reliability and service orchestration.
+
+6.3 Recommendations for future work
+
+1. Add domain-level quality scoring and selective crawl policy.
+2. Extend explainable ranking details in frontend cards.
+3. Add richer report generation templates and export paths.
+4. Extend test coverage for ingestion orchestration edge cases.
+5. Add role-based admin controls for scheduling and run governance.
+
+-------------------------------------------------------------------------------
+Bibliography
+
+[1] Lewis, M., Liu, Y., Goyal, N., et al. (2020). BART: Denoising Sequence-to-Sequence
+Pre-training for Natural Language Generation, Translation, and Comprehension.
+
+[2] Wolf, T., Debut, L., Sanh, V., et al. (2020). Transformers: State-of-the-Art Natural
+Language Processing.
+
+[3] Yin, W., Hay, J., and Roth, D. (2019). Benchmarking Zero-shot Text Classification.
+
+[4] FastAPI Documentation. https://fastapi.tiangolo.com/
+
+[5] React Documentation. https://react.dev/
+
+[6] SQLAlchemy Documentation. https://www.sqlalchemy.org/
+
+[7] Celery Documentation. https://docs.celeryq.dev/
+
+[8] Redis Documentation. https://redis.io/docs/
+
+[9] SerpApi Documentation. https://serpapi.com/
+
+[10] Hugging Face Transformers Documentation. https://huggingface.co/docs/transformers
+
+-------------------------------------------------------------------------------
+Appendices
+
+-------------------------------------------------------------------------------
+Appendix A
+Source code
+
+Important V2 excerpts are provided below.
+
+BACKEND:
+
+MODELS.py (V2)
+
+class Article(Base):
+    __tablename__ = "articles"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    canonical_url: Mapped[Optional[str]] = mapped_column(String(1000), index=True)
+    source: Mapped[Optional[str]] = mapped_column(String(255))
+    source_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sources.id"), index=True)
+    author: Mapped[Optional[str]] = mapped_column(String(255))
+    image_url: Mapped[Optional[str]] = mapped_column(String(1000))
+    raw_html: Mapped[Optional[str]] = mapped_column(Text)
+    clean_text: Mapped[Optional[str]] = mapped_column(Text)
+    word_count: Mapped[Optional[int]] = mapped_column(Integer)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    extraction_status: Mapped[str] = mapped_column(String(50), default="discovered", nullable=False)
+
+class ArticleTopicScore(Base):
+    __tablename__ = "article_topic_scores"
+    __table_args__ = (UniqueConstraint("article_id", "topic_id", name="uq_article_topic_score"),)
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"), index=True)
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id", ondelete="CASCADE"), index=True)
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+    run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), index=True, nullable=False)
+    topics_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    urls_discovered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    urls_scraped: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    success_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+SCHEMAS.py (V2)
+
+class FeedArticle(BaseModel):
+    article: Article
+    matched_topic: Topic
+    matched_score: Optional[float] = None
+    ranking_score: Optional[float] = None
+    source_weight: Optional[float] = None
+    topic_weight: Optional[float] = None
+
+class FullArticleContentOut(BaseModel):
+    article_id: int
+    title: str
+    source: Optional[str] = None
+    published_at: datetime
+    url: str
+    canonical_url: Optional[str] = None
+    extraction_status: str
+    word_count: Optional[int] = None
+    clean_text: Optional[str] = None
+    is_full_content_available: bool
+
+class IngestionRunOut(BaseModel):
+    run_id: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    status: str
+    topics_total: int
+    urls_discovered: int
+    urls_scraped: int
+    success_count: int
+    fail_count: int
+
+CLASSIFIER.py (V2)
+
+def _resolve_model_name() -> str:
+    if settings.ENABLE_LOCAL_RANKER:
+        return settings.LOCAL_CLASSIFIER_MODEL_NAME
+    return settings.ZERO_SHOT_MODEL_NAME
+
+def _get_classifier() -> Optional[object]:
+    if pipeline is None:
+        print("Warning: transformers pipeline unavailable; using fallback classifier.")
+        return None
+
+    model_name = _resolve_model_name()
+    mode_label = "small-local" if settings.ENABLE_LOCAL_RANKER else "large-zero-shot"
+    print(f"Loading classifier model '{model_name}' ({mode_label})...")
+    ...
+
+def classify_article_content(content: str, topics: List[str]) -> List[Dict[str, Union[str, float]]]:
+    if not content or not topics:
+        return []
+    classifier = _get_classifier()
+    if classifier is None:
+        return _fallback_classify(content, topics)
+    ...
+
+API.py (V2)
+
+@api_router.post("/articles/fetch-and-process", tags=["Articles"])
+def fetch_and_process_articles(...):
+    topic_ids_to_process = list(dict.fromkeys(request_body.topic_ids))
+    ...
+    if settings.ENABLE_ASYNC_INGESTION:
+        run = ingestion_service.create_ingestion_run(...)
+        async_result = tasks.process_ingestion_run.delay(
+            run.run_id,
+            topic_ids_to_process,
+            settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+        )
+        return schemas.IngestionEnqueueResponse(...)
+
+@api_router.post("/admin/ingestion/run-active", tags=["Admin"])
+def run_active_topic_ingestion(...):
+    active_topics = (...).limit(batch_size).all()
+    ...
+
+@api_router.get("/articles/{article_id}/full-content", response_model=schemas.FullArticleContentOut)
+def get_full_article_content(...):
+    ...
+
+@api_router.get("/feed", response_model=List[schemas.FeedArticle], tags=["Feed"])
+def get_personalized_feed(...):
+    feed_links = (...).order_by(
+        models.Article.fetched_at.desc(),
+        models.Article.published_at.desc()
+    ).limit(400).all()
+    ...
+    return sorted(
+        ranked_by_article.values(),
+        key=lambda item: (
+            freshness_scores.get(item.article.id) or item.article.published_at,
+            item.ranking_score if item.ranking_score is not None else -999,
+            item.article.published_at,
+        ),
+        reverse=True,
+    )[:100]
+
+FRONTEND:
+
+App.jsx (V2)
+
+const API_BASE_URL = 'http://127.0.0.1:8011';
+
+function App() {
+  const [token, setToken] = useState(localStorage.getItem('news_token'));
+  const [user, setUser] = useState(null);
+  const [isBooting, setIsBooting] = useState(true);
+  const [view, setView] = useState('landing');
+  ...
+  if (view === 'app') {
+    return (
+      <div className="workspace-shell">
+        ...
+        <NewsFeed token={token} user={user} onUserUpdate={setUser} />
+      </div>
+    );
+  }
+}
+
+NewsFeed.jsx (V2)
+
+export function NewsFeed({ token, user, onUserUpdate }) {
+  const [ingestionRuns, setIngestionRuns] = useState([]);
+  const [isRunningAdminSweep, setIsRunningAdminSweep] = useState(false);
+  const [readerArticle, setReaderArticle] = useState(null);
+  const [readerContent, setReaderContent] = useState(null);
+
+  const fetchRuns = useCallback(async () => {
+    const runs = await apiFetch('/ingestion/runs?limit=8');
+    setIngestionRuns(Array.isArray(runs) ? runs : []);
+  }, [apiFetch]);
+
+  const handleRunAdminSweep = async () => {
+    const result = await apiFetch('/admin/ingestion/run-active?batch_size=250', {
+      method: 'POST',
+    });
+    ...
+  };
+
+  const handleReadInApp = async (article) => {
+    const payload = await apiFetch(`/articles/${article.id}/full-content?refresh_if_missing=true`);
+    setReaderContent(payload);
+  };
+
+  const handleFeedback = async (articleId, feedbackType) => {
+    await apiFetch(`/articles/${articleId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback_type: feedbackType }),
+    });
+    ...
+  };
+}
+
+-------------------------------------------------------------------------------
+Appendix B
+Screen shots
+
+Fig 1: Backend Schemas and Relationship Diagram (V2)
+Fig 2: Ingestion Run Metrics and Admin Sweep UI
+Fig 3: Frontend Landing Page (V2)
+Fig 4: Login/Signup Page (V2)
+Fig 5: Personalized Feed Page with Freshness and Ranking Signals
+Fig 6: Search Page
+Fig 7: Edit Topics Page
+Fig 8: In-App Reader and Full Content Modal
+Fig 9: PostgreSQL Tables (V2)

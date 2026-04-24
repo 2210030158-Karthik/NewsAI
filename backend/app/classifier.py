@@ -1,83 +1,120 @@
-import numpy # <-- ADDED THIS IMPORT
-from transformers import pipeline
-from typing import List, Dict, Union
+import re
+from typing import Dict, List, Optional, Union
 
-# --- Initialize the AI Model (Classifier) ---
-# ... (rest of the file remains the same) ...
-
-print("Loading Zero-Shot-Classification model...")
-# Check if CUDA is available and set the device
 try:
-    import torch
-    if torch.cuda.is_available():
-        device = 0 # Use the first GPU
-        print("Device set to use CUDA (GPU)")
-    else:
-        device = -1 # Use CPU
-        print("Device set to use cpu")
-except ImportError:
-    device = -1 # Use CPU if torch is not installed (should not happen with requirements)
-    print("Torch not found. Device set to use cpu")
+    from transformers import pipeline
+except Exception:
+    pipeline = None
+
+from .config import settings
 
 
-# Load the pipeline specifying the device
-classifier = pipeline("zero-shot-classification",
-                      model="facebook/bart-large-mnli",
-                      device=device) # Specify the device
-print("Model loaded successfully.")
+_classifier = None
+_classifier_initialized = False
 
 
-# --- Define the Classification Function ---
+def _tokenize(value: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z0-9]+", value.lower()))
+
+
+def _fallback_classify(content: str, topics: List[str]) -> List[Dict[str, Union[str, float]]]:
+    """
+    Lightweight lexical fallback to keep ingestion running when large model
+    cannot be loaded on constrained environments.
+    """
+    content_tokens = _tokenize(content)
+    if not content_tokens:
+        return []
+
+    scored_topics: List[Dict[str, Union[str, float]]] = []
+    for topic in topics:
+        topic_tokens = _tokenize(topic)
+        overlap = len(content_tokens.intersection(topic_tokens))
+        confidence = 0.05 + min(0.9, (overlap / max(1, len(topic_tokens))) * 0.9)
+        scored_topics.append({
+            "topic": topic,
+            "score": float(confidence),
+        })
+
+    return sorted(scored_topics, key=lambda item: float(item["score"]), reverse=True)
+
+
+def _resolve_model_name() -> str:
+    if settings.ENABLE_LOCAL_RANKER:
+        return settings.LOCAL_CLASSIFIER_MODEL_NAME
+    return settings.ZERO_SHOT_MODEL_NAME
+
+
+def _get_classifier() -> Optional[object]:
+    global _classifier
+    global _classifier_initialized
+
+    if _classifier_initialized:
+        return _classifier
+
+    _classifier_initialized = True
+    if pipeline is None:
+        print("Warning: transformers pipeline unavailable; using fallback classifier.")
+        return None
+
+    model_name = _resolve_model_name()
+    mode_label = "small-local" if settings.ENABLE_LOCAL_RANKER else "large-zero-shot"
+    print(f"Loading classifier model '{model_name}' ({mode_label})...")
+    try:
+        try:
+            import torch
+
+            device = 0 if torch.cuda.is_available() else -1
+            print("Device set to use CUDA (GPU)" if device == 0 else "Device set to use cpu")
+        except Exception:
+            device = -1
+            print("Torch unavailable. Device set to use cpu")
+
+        _classifier = pipeline(
+            "zero-shot-classification",
+            model=model_name,
+            device=device,
+        )
+        print("Model loaded successfully.")
+    except Exception as exc:
+        _classifier = None
+        print(f"Warning: failed to load '{model_name}'. Falling back to lexical classifier. Error: {exc}")
+
+    return _classifier
+
 
 def classify_article_content(content: str, topics: List[str]) -> List[Dict[str, Union[str, float]]]:
     """
-    Takes a piece of text (article content) and a list of candidate topics.
-    Returns a list of dictionaries with scores for each topic.
+    Takes article content and candidate topics and returns scored topics.
     """
     if not content or not topics:
         return []
 
-    # Basic cleaning - remove excessive whitespace which might indicate issues
-    content = ' '.join(content.split())
-    if not content: # Check again after stripping whitespace
-        print("Warning: Content is empty after cleaning.")
+    content = " ".join(content.split())
+    if not content:
         return []
 
+    classifier = _get_classifier()
+    if classifier is None:
+        return _fallback_classify(content, topics)
 
     try:
-        # We set multi_label=True because an article can be about
-        # "Politics" AND "Law" at the same time.
-        # Add truncation to handle long articles gracefully
-        result = classifier(content, topics, multi_label=True, truncation=True, max_length=512) # Added truncation
-
-        # The result from the pipeline is a bit messy. Let's clean it up.
-        classified_scores = []
-        if 'labels' in result and 'scores' in result:
-             for label, score in zip(result['labels'], result['scores']):
-                 classified_scores.append({
-                     "topic": label,
-                     "score": score
-                 })
-        else:
-             print(f"Warning: Unexpected result format from classifier for content starting with: {content[:100]}...")
-             print(f"Result received: {result}")
-
-
-        return classified_scores
-
-    except ImportError as e:
-         # Catch the specific error we are seeing
-         print(f"FATAL: ImportError during classification: {e}")
-         print("This likely means a required library (like numpy) is missing or cannot be found by the runtime.")
-         # Re-raise the error to stop the process, as this is critical
-         raise e
-    except Exception as e:
-        print(f"Error during classification: {e}")
-        # Log the type of error and the beginning of the content
-        print(f"Error type: {type(e)}")
-        print(f"Content (start): {content[:100]}...")
-        # If something else fails, return empty
-        return []
+        result = classifier(
+            content,
+            topics,
+            multi_label=True,
+            truncation=True,
+            max_length=settings.CLASSIFIER_MAX_LABEL_TEXT_LENGTH,
+        )
+        if "labels" in result and "scores" in result:
+            return [
+                {"topic": label, "score": float(score)}
+                for label, score in zip(result["labels"], result["scores"])
+            ]
+        return _fallback_classify(content, topics)
+    except Exception as exc:
+        print(f"Warning: model classification failed, using fallback classifier. Error: {exc}")
+        return _fallback_classify(content, topics)
 
 # --- Example of how to use this (for testing) ---
 if __name__ == "__main__":

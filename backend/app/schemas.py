@@ -109,6 +109,24 @@ class FeedArticle(BaseModel):
     article: Article
     matched_topic: Topic
     matched_score: Optional[float] = None
+    ranking_score: Optional[float] = None
+    source_weight: Optional[float] = None
+    topic_weight: Optional[float] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FullArticleContentOut(BaseModel):
+    article_id: int
+    title: str
+    source: Optional[str] = None
+    published_at: datetime
+    url: str
+    canonical_url: Optional[str] = None
+    extraction_status: str
+    word_count: Optional[int] = None
+    clean_text: Optional[str] = None
+    is_full_content_available: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -141,6 +159,15 @@ class UserFeedbackOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UserPreferenceProfileOut(BaseModel):
+    user_id: int
+    topic_weights_json: Dict[str, float]
+    source_weights_json: Dict[str, float]
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class IngestionRunOut(BaseModel):
     run_id: str
     started_at: datetime
@@ -153,6 +180,14 @@ class IngestionRunOut(BaseModel):
     fail_count: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class IngestionEnqueueResponse(BaseModel):
+    message: str
+    run_id: str
+    task_id: str
+    status: str
+    topics_total: int
 
 
 class PersonalizedReportOut(BaseModel):

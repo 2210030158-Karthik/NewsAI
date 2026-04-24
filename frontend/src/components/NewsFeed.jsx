@@ -1,203 +1,349 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { TopicEditor } from './TopicEditor.jsx'; 
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { TopicEditor } from './TopicEditor.jsx';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
-const COOLDOWN_HOURS = 2;
-const COOLDOWN_MS = COOLDOWN_HOURS * 60 * 60 * 1000;
+const API_BASE_URL = 'http://127.0.0.1:8011';
 
-function formatCooldownTime(totalSeconds) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `On Cooldown (${hours}h ${minutes}m ${seconds}s)`;
-}
+const truncate = (value, maxChars = 180) => {
+  if (!value) {
+    return '';
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars).trim()}...`;
+};
+
+const scoreLabel = (score) => {
+  if (score === null || score === undefined) {
+    return 'N/A';
+  }
+  return Number(score).toFixed(2);
+};
+
+const toReadableParagraphs = (value) => {
+  if (!value) {
+    return [];
+  }
+
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length === 0) {
+    return [normalized];
+  }
+
+  const paragraphs = [];
+  for (let index = 0; index < sentences.length; index += 3) {
+    paragraphs.push(sentences.slice(index, index + 3).join(' '));
+  }
+  return paragraphs;
+};
 
 export function NewsFeed({ token, user, onUserUpdate }) {
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [cooldownTime, setCooldownTime] = useState(0); 
-  const [justRefreshed, setJustRefreshed] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isEditingTopics, setIsEditingTopics] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
-  const [feedDisplayMode, setFeedDisplayMode] = useState('feed'); // 'feed' or 'search'
+  const [isEditingTopics, setIsEditingTopics] = useState(false);
+  const [feedMode, setFeedMode] = useState('feed');
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentSearchTerm, setCurrentSearchTerm] = useState(''); 
+  const [currentSearchTerm, setCurrentSearchTerm] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
-  // --- NEW STATE FOR MUTING ---
-  const [mutedKeywords, setMutedKeywords] = useState([]);
   const [muteInput, setMuteInput] = useState('');
-  // --- END NEW STATE ---
+  const [mutedKeywords, setMutedKeywords] = useState([]);
 
-  const userCooldownKey = user ? `lastRefreshTimestamp_${user.email}` : null;
+  const [feedbackMap, setFeedbackMap] = useState({});
+  const [pendingFeedbackId, setPendingFeedbackId] = useState(null);
+
+  const [isRefreshingFeed, setIsRefreshingFeed] = useState(false);
+
+  const [reportData, setReportData] = useState(null);
+  const [isReportLoading, setIsReportLoading] = useState(true);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState('');
+
+  const [readerArticle, setReaderArticle] = useState(null);
+  const [readerContent, setReaderContent] = useState(null);
+  const [isReaderLoading, setIsReaderLoading] = useState(false);
+  const [readerError, setReaderError] = useState('');
+
+  const apiFetch = useCallback(
+    async (path, options = {}) => {
+      const response = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
+        },
+      });
+
+      if (!response.ok) {
+        let errorPayload = null;
+        try {
+          errorPayload = await response.json();
+        } catch {
+          errorPayload = null;
+        }
+        throw new Error(errorPayload?.detail || `Request failed (${response.status}).`);
+      }
+
+      if (response.status === 204) {
+        return null;
+      }
+
+      return response.json();
+    },
+    [token]
+  );
 
   const fetchFeed = useCallback(async () => {
-    if (!token) return;
     setIsLoading(true);
     setError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/feed`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch your personalized feed.');
-      }
-      const data = await response.json();
-      setArticles(data); 
-    } catch (err) {
-      setError(err.message);
+      const data = await apiFetch('/feed');
+      setArticles(Array.isArray(data) ? data : []);
+    } catch (fetchError) {
+      setError(fetchError.message || 'Unable to load your feed.');
     } finally {
       setIsLoading(false);
     }
-  }, [token]); 
+  }, [apiFetch]);
+
+  const loadLatestReport = useCallback(async () => {
+    setIsReportLoading(true);
+    setReportError('');
+    try {
+      const report = await apiFetch('/reports/latest');
+      setReportData(report);
+    } catch (reportLoadError) {
+      if (reportLoadError.message.toLowerCase().includes('no report found')) {
+        setReportData(null);
+      } else {
+        setReportError(reportLoadError.message || 'Could not load report.');
+      }
+    } finally {
+      setIsReportLoading(false);
+    }
+  }, [apiFetch]);
 
   useEffect(() => {
-    if (!isEditingTopics && feedDisplayMode === 'feed') {
+    if (!isEditingTopics && feedMode === 'feed') {
       fetchFeed();
     }
-  }, [fetchFeed, isEditingTopics, feedDisplayMode]); 
+  }, [feedMode, fetchFeed, isEditingTopics]);
 
   useEffect(() => {
-    if (!userCooldownKey) return; 
-    const updateCooldown = () => {
-      const lastRefresh = localStorage.getItem(userCooldownKey);
-      if (!lastRefresh) {
-        setCooldownTime(0);
-        return;
-      }
-      const timePassed = Date.now() - parseInt(lastRefresh);
-      if (timePassed < COOLDOWN_MS) {
-        const remainingMs = COOLDOWN_MS - timePassed;
-        setCooldownTime(Math.ceil(remainingMs / 1000));
-      } else {
-        setCooldownTime(0);
-      }
-    };
-    updateCooldown(); 
-    const interval = setInterval(updateCooldown, 1000); 
-    return () => clearInterval(interval);
-  }, [userCooldownKey]);
+    loadLatestReport();
+  }, [loadLatestReport]);
 
-  const handleRefreshClick = async () => {
-    if (cooldownTime > 0 || isRefreshing || !userCooldownKey || !user) return; 
-    setIsRefreshing(true);
+  const handleRefreshFeed = async () => {
+    const topicIds = (user?.topics || []).map((topic) => topic.id);
+    if (topicIds.length === 0) {
+      setError('Please select topics before refreshing your feed.');
+      return;
+    }
+
+    setIsRefreshingFeed(true);
     setError('');
-    setJustRefreshed(false);
+    setSuccessMessage('');
     try {
-      const topicIds = user.topics.map(topic => topic.id);
-      if (topicIds.length === 0) {
-        throw new Error("You have no topics selected.");
-      }
-      const processResponse = await fetch(`${API_BASE_URL}/articles/fetch-and-process`, {
+      const result = await apiFetch('/articles/fetch-and-process', {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ topic_ids: topicIds })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic_ids: topicIds }),
       });
-      if (!processResponse.ok) {
-        throw new Error('Failed to start article processing.');
+
+      if (result?.status === 'queued') {
+        setSuccessMessage(`Fetch queued. Run ID: ${result.run_id}`);
+      } else {
+        setSuccessMessage(result?.message || 'Article fetch completed.');
       }
-      await fetchFeed(); 
-      localStorage.setItem(userCooldownKey, Date.now().toString());
-      setCooldownTime(COOLDOWN_HOURS * 60 * 60);
-      setJustRefreshed(true);
-      setTimeout(() => setJustRefreshed(false), 3000);
-    } catch (err) {
-      setError(err.message);
+
+      await fetchFeed();
+    } catch (refreshError) {
+      setError(refreshError.message || 'Could not fetch articles.');
     } finally {
-      setIsRefreshing(false);
+      setIsRefreshingFeed(false);
     }
   };
 
-  const handleTopicsUpdated = (updatedUser) => {
-    onUserUpdate(updatedUser); 
-    setIsEditingTopics(false); 
-  };
-
-  const handleSearchSubmit = async (e) => {
-    e.preventDefault();
+  const handleSearchSubmit = async (event) => {
+    event.preventDefault();
     const query = searchTerm.trim();
-    if (!query) return;
+    if (!query) {
+      return;
+    }
 
     setIsSearching(true);
     setError('');
+    setSuccessMessage('');
+
     try {
-      const url = `${API_BASE_URL}/search?q=${encodeURIComponent(query)}`;
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        }
-      });
-      if (!response.ok) {
-        throw new Error('Search failed. Please try again.');
-      }
-      const data = await response.json();
-      
-      setArticles(data); 
-      setFeedDisplayMode('search');
-      setCurrentSearchTerm(query); 
-    } catch (err) {
-      setError(err.message);
+      const data = await apiFetch(`/search?q=${encodeURIComponent(query)}`);
+      setArticles(Array.isArray(data) ? data : []);
+      setFeedMode('search');
+      setCurrentSearchTerm(query);
+    } catch (searchError) {
+      setError(searchError.message || 'Search failed.');
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleClearSearch = () => {
-    setArticles([]); 
-    setFeedDisplayMode('feed');
+    setFeedMode('feed');
     setSearchTerm('');
     setCurrentSearchTerm('');
   };
 
-  // --- NEW MUTE KEYWORD HANDLERS ---
-  const handleMuteSubmit = (e) => {
-    e.preventDefault();
-    const keywordToAdd = muteInput.trim().toLowerCase();
-    if (keywordToAdd && !mutedKeywords.includes(keywordToAdd)) {
-      setMutedKeywords([...mutedKeywords, keywordToAdd]);
+  const handleAddMutedKeyword = (event) => {
+    event.preventDefault();
+    const keyword = muteInput.trim().toLowerCase();
+    if (!keyword) {
+      return;
     }
-    setMuteInput(''); // Clear the input
+    if (!mutedKeywords.includes(keyword)) {
+      setMutedKeywords((previous) => [...previous, keyword]);
+    }
+    setMuteInput('');
   };
 
-  const removeMutedKeyword = (keywordToRemove) => {
-    setMutedKeywords(mutedKeywords.filter(k => k !== keywordToRemove));
+  const handleRemoveMutedKeyword = (keywordToRemove) => {
+    setMutedKeywords((previous) => previous.filter((keyword) => keyword !== keywordToRemove));
   };
-  // --- END NEW HANDLERS ---
 
+  const handleFeedback = async (articleId, feedbackType) => {
+    setPendingFeedbackId(articleId);
+    setError('');
+    try {
+      await apiFetch(`/articles/${articleId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback_type: feedbackType }),
+      });
 
-  const isButtonDisabled = cooldownTime > 0 || isRefreshing;
-  
-  const getButtonText = () => {
-    if (isRefreshing) {
-      return (
-        <>
-          <span className="button-spinner"></span>
-          Processing...
-        </>
-      );
+      setFeedbackMap((previous) => ({
+        ...previous,
+        [articleId]: feedbackType,
+      }));
+      setSuccessMessage(`Feedback saved: ${feedbackType}. Ranking model updated.`);
+
+      if (feedMode === 'feed') {
+        await fetchFeed();
+      }
+    } catch (feedbackError) {
+      setError(feedbackError.message || 'Could not save feedback.');
+    } finally {
+      setPendingFeedbackId(null);
     }
-    if (cooldownTime > 0) {
-      return formatCooldownTime(cooldownTime);
-    }
-    return 'Refresh Feed';
   };
-  
+
+  const handleGenerateReport = async () => {
+    setIsGeneratingReport(true);
+    setReportError('');
+    setSuccessMessage('');
+    try {
+      const report = await apiFetch('/reports/generate', {
+        method: 'POST',
+      });
+      setReportData(report);
+      setSuccessMessage('New personalized report generated.');
+    } catch (generateError) {
+      setReportError(generateError.message || 'Could not generate report.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const handleCloseReader = () => {
+    setReaderArticle(null);
+    setReaderContent(null);
+    setReaderError('');
+    setIsReaderLoading(false);
+  };
+
+  const handleReadInApp = async (article) => {
+    if (!article?.id || feedMode !== 'feed') {
+      window.open(article?.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    setReaderArticle(article);
+    setReaderContent(null);
+    setReaderError('');
+    setIsReaderLoading(true);
+
+    try {
+      const payload = await apiFetch(`/articles/${article.id}/full-content?refresh_if_missing=true`);
+      setReaderContent(payload);
+    } catch (loadError) {
+      setReaderError(loadError.message || 'Unable to load full article content.');
+    } finally {
+      setIsReaderLoading(false);
+    }
+  };
+
+  const handleTopicsUpdated = (updatedUser) => {
+    onUserUpdate(updatedUser);
+    setIsEditingTopics(false);
+    setSuccessMessage('Topics updated successfully.');
+    setFeedMode('feed');
+    fetchFeed();
+  };
+
+  const normalizedItems = useMemo(() => {
+    if (feedMode === 'feed') {
+      return articles.map((item) => ({
+        article: item.article,
+        matchedTopic: item.matched_topic,
+        matchedScore: item.matched_score,
+        rankingScore: item.ranking_score,
+        sourceWeight: item.source_weight,
+        topicWeight: item.topic_weight,
+      }));
+    }
+
+    return articles.map((article) => ({
+      article,
+      matchedTopic: null,
+      matchedScore: null,
+      rankingScore: null,
+      sourceWeight: null,
+      topicWeight: null,
+    }));
+  }, [articles, feedMode]);
+
+  const filteredItems = useMemo(() => {
+    if (mutedKeywords.length === 0) {
+      return normalizedItems;
+    }
+
+    return normalizedItems.filter((item) => {
+      const searchableText = `${item.article.title || ''} ${item.article.description || ''}`.toLowerCase();
+      return mutedKeywords.every((keyword) => !searchableText.includes(keyword));
+    });
+  }, [mutedKeywords, normalizedItems]);
+
+  const readerParagraphs = useMemo(() => {
+    return toReadableParagraphs(readerContent?.clean_text || '');
+  }, [readerContent]);
+
+  const readerExtractionStatus = readerContent?.extraction_status || '';
+  const readerLikelyBlocked =
+    readerExtractionStatus === 'blocked_source' || readerExtractionStatus === 'fetch_failed';
+  const readerFallbackPreview =
+    readerArticle?.description && readerArticle.description !== 'No description available.'
+      ? truncate(readerArticle.description, 360)
+      : '';
+
   if (isEditingTopics) {
     return (
-      <div className="feed-container">
-        <div className="feed-header" style={{ borderBottom: 'none' }}>
-          <div>
-            <h2 className="feed-title">Edit Your Topics</h2>
-            <p className="feed-subtitle">Select the topics you're interested in.</p>
-          </div>
-        </div>
+      <div className="newsroom-shell single-column">
         <TopicEditor
           token={token}
           currentUser={user}
@@ -208,186 +354,267 @@ export function NewsFeed({ token, user, onUserUpdate }) {
     );
   }
 
-  const showLoading = isLoading || isSearching;
-  
-  const topicCount = user ? user.topics.length : 0;
-
-  // --- NEW FILTER LOGIC ---
-  const filteredArticles = articles.filter(item => {
-    if (mutedKeywords.length === 0) {
-      return true; // No keywords to mute, show all
-    }
-    // Get the correct article object (works for feed and search)
-    const article = feedDisplayMode === 'feed' ? item.article : item;
-    const textToCheck = `${article.title} ${article.description}`.toLowerCase();
-    
-    // Return true (keep) if *none* of the muted keywords are found
-    return !mutedKeywords.some(keyword => textToCheck.includes(keyword));
-  });
-  // --- END FILTER LOGIC ---
-
-
   return (
-    <div className="feed-container">
-      <div className="feed-header">
-        <div>
-          <h2 className="feed-title">
-            {feedDisplayMode === 'feed' ? 'Your Personalized Feed' : 'Search Results'}
-          </h2>
-          <p className="feed-subtitle">
-            {feedDisplayMode === 'feed'
-              ? `Based on your ${topicCount} selected topic(s).`
-              : `Showing results for "${currentSearchTerm}"`
-            }
-          </p>
-        </div>
-        {feedDisplayMode === 'feed' && (
-          <div className="feed-actions">
-            {justRefreshed && (
-              <span className="refresh-success">Refreshed!</span>
-            )}
-            <button 
-              className="button-secondary"
-              onClick={() => setIsEditingTopics(true)}
-            >
-              Edit Topics
-            </button>
-            <button 
-              className="button-secondary" 
-              onClick={handleRefreshClick}
-              disabled={isButtonDisabled}
-              style={{ minWidth: '160px' }}
-            >
-              {getButtonText()}
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="search-bar-container">
-        <form className="search-form" onSubmit={handleSearchSubmit}>
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Search for any topic (e.g., 'Cyberpunk 2077')..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          <button type="submit" className="button-primary" disabled={isSearching}>
-            {isSearching ? <span className="button-spinner-light"></span> : 'Search'}
-          </button>
-        </form>
-        {feedDisplayMode === 'search' && (
-          <button className="back-link" onClick={handleClearSearch} style={{ marginBottom: 0 }}>
-            &larr; Back to your personalized feed
-          </button>
-        )}
-      </div>
-
-      {/* --- NEW MUTE KEYWORD SECTION --- */}
-      <div className="mute-container">
-        <form className="mute-form" onSubmit={handleMuteSubmit}>
-          <input
-            type="text"
-            className="mute-input"
-            placeholder="Mute a keyword (e.g., 'Kardashian')..."
-            value={muteInput}
-            onChange={(e) => setMuteInput(e.target.value)}
-          />
-          <button type="submit" className="button-secondary">Mute</button>
-        </form>
-        
-        {mutedKeywords.length > 0 && (
-          <div className="muted-keyword-list">
-            {mutedKeywords.map(keyword => (
-              <span key={keyword} className="muted-keyword-item">
-                {keyword}
-                <button onClick={() => removeMutedKeyword(keyword)}>&times;</button>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      {/* --- END NEW MUTE SECTION --- */}
-      
-      {error && <p className="error-message">{error}</p>}
-
-      <>
-        {showLoading ? (
-          <div className="loading-spinner" style={{margin: '3rem auto'}}></div>
-        ) : filteredArticles.length === 0 ? ( // Use filtered list
-          <div className="card" style={{maxWidth: '100%', textAlign: 'center'}}>
+    <div className="newsroom-shell">
+      <section className="news-main-col">
+        <header className="news-main-header reveal-1">
+          <div>
+            <p className="eyebrow">Your intelligence desk</p>
+            <h2>{feedMode === 'feed' ? 'Personalized Feed' : `Search: ${currentSearchTerm}`}</h2>
             <p>
-              {articles.length === 0 && feedDisplayMode === 'search'
-                ? 'No articles found for your search term.'
-                : (articles.length === 0 && feedDisplayMode === 'feed'
-                  ? "Your feed is empty. Try refreshing or adding more topics!"
-                  : "All articles are hidden by your muted keywords."
-                )
-              }
+              {feedMode === 'feed'
+                ? `Tracking ${(user?.topics || []).length} active topic(s) with real-time ranking updates.`
+                : 'Live search results from SerpApi, independent from your saved feed.'}
             </p>
           </div>
-        ) : (
-          <div className="feed-list-container">
-            {/* --- USE THE FILTERED LIST TO RENDER --- */}
-            {filteredArticles.map((item, index) => {
-              
-              const article = feedDisplayMode === 'feed' ? item.article : item;
-              const matched_topic = feedDisplayMode === 'feed' ? item.matched_topic : null;
-              
-              const hasValidDescription = article.description && 
-                                          article.description.toLowerCase() !== 'no description available.';
-              
-              const key = article.url ? article.url : `article-${index}`;
-              const imageUrl = article.image_url; 
+          <div className="header-action-grid">
+            <button className="button-secondary" onClick={() => setIsEditingTopics(true)}>
+              Edit Topics
+            </button>
+            <button
+              className={isRefreshingFeed ? 'button-secondary' : 'button-primary'}
+              disabled={isRefreshingFeed}
+              onClick={handleRefreshFeed}
+            >
+              {isRefreshingFeed ? 'Fetching...' : 'Fetch Articles'}
+            </button>
+          </div>
+        </header>
+
+        <section className="command-bar reveal-2">
+          <form className="search-form" onSubmit={handleSearchSubmit}>
+            <input
+              className="field-input"
+              type="text"
+              placeholder="Search topics, markets, events, or entities"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+            <button className="button-primary" type="submit" disabled={isSearching}>
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
+            {feedMode === 'search' && (
+              <button className="button-secondary" type="button" onClick={handleClearSearch}>
+                Back to Feed
+              </button>
+            )}
+          </form>
+
+          <form className="mute-form" onSubmit={handleAddMutedKeyword}>
+            <input
+              className="field-input"
+              type="text"
+              placeholder="Mute keyword (example: gossip)"
+              value={muteInput}
+              onChange={(event) => setMuteInput(event.target.value)}
+            />
+            <button className="button-secondary" type="submit">
+              Mute
+            </button>
+          </form>
+
+          {mutedKeywords.length > 0 && (
+            <div className="keyword-pills">
+              {mutedKeywords.map((keyword) => (
+                <button
+                  key={keyword}
+                  className="keyword-pill"
+                  type="button"
+                  onClick={() => handleRemoveMutedKeyword(keyword)}
+                >
+                  {keyword} ×
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {error && <div className="error-message reveal-3">{error}</div>}
+        {successMessage && <div className="success-message reveal-3">{successMessage}</div>}
+
+        <section className="article-stream reveal-3">
+          {isLoading || isSearching ? (
+            <div className="loading-panel">Loading stories...</div>
+          ) : filteredItems.length === 0 ? (
+            <div className="empty-panel">
+              {feedMode === 'search'
+                ? 'No stories matched this search.'
+                : 'No stories available yet. Trigger a refresh to fetch articles.'}
+            </div>
+          ) : (
+            filteredItems.map((item, index) => {
+              const article = item.article;
+              const summary =
+                article.clean_text && article.clean_text.trim().length > 0
+                  ? article.clean_text
+                  : article.description;
 
               return (
-                <a 
-                  key={key} 
-                  href={article.url} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="article-card-link"
+                <article
+                  key={article.id || article.url || `story-${index}`}
+                  className="story-card"
+                  style={{ animationDelay: `${Math.min(index * 35, 320)}ms` }}
                 >
-                  <div className="article-card">
-                    {imageUrl && (
-                      <img 
-                        src={imageUrl} 
-                        alt={article.title} 
-                        className="article-image" 
-                        onError={(e) => {
-                          e.target.src = 'https://placehold.co/150x150/f1f5f9/64748b?text=No+Image';
-                          e.target.onerror = null;
-                        }}
-                      />
+                  <div className="story-media-wrap">
+                    {article.image_url ? (
+                      <img className="story-media" src={article.image_url} alt={article.title} />
+                    ) : (
+                      <div className="story-media placeholder">No image</div>
                     )}
-                    <div 
-                      className="article-content" 
-                      style={{ paddingLeft: imageUrl ? 0 : '1rem' }}
-                    >
-                      <span className="article-source">
-                        {article.source || 'News Source'}
-                      </span>
-                      <h3 className="article-title">{article.title}</h3>
-                      
-                      {hasValidDescription ? (
-                        <p className="article-summary">{article.description}</p>
-                      ) : (
-                        <p className="article-summary-fallback">
-                          {feedDisplayMode === 'feed' && matched_topic
-                            ? `Primary Topic: ${matched_topic.name}`
-                            : (feedDisplayMode === 'search' ? 'Search Result' : 'No summary')
-                          }
-                        </p>
+                  </div>
+
+                  <div className="story-body">
+                    <div className="story-meta-row">
+                      <span className="story-source">{article.source || 'Unknown source'}</span>
+                      <span className="story-date">{new Date(article.published_at).toLocaleString()}</span>
+                    </div>
+
+                    <h3 className="story-title">{article.title}</h3>
+                    <p className="story-summary">{truncate(summary || 'No summary available.', 220)}</p>
+
+                    <div className="story-chip-row">
+                      {item.matchedTopic && <span className="story-chip">Topic: {item.matchedTopic.name}</span>}
+                      {item.rankingScore !== null && (
+                        <span className="story-chip">Rank: {scoreLabel(item.rankingScore)}</span>
+                      )}
+                      {item.topicWeight !== null && (
+                        <span className="story-chip muted">Topic Weight: {scoreLabel(item.topicWeight)}</span>
+                      )}
+                      {item.sourceWeight !== null && (
+                        <span className="story-chip muted">Source Weight: {scoreLabel(item.sourceWeight)}</span>
+                      )}
+                    </div>
+
+                    <div className="story-actions">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => handleReadInApp(article)}
+                      >
+                        {article.id && feedMode === 'feed' ? 'Read In App' : 'Read Full Article'}
+                      </button>
+
+                      <a className="button-secondary" href={article.url} target="_blank" rel="noreferrer">
+                        Open Source
+                      </a>
+
+                      {article.id && feedMode === 'feed' && (
+                        <>
+                          <button
+                            type="button"
+                            className={`reaction-btn ${feedbackMap[article.id] === 'like' ? 'active-like' : ''}`}
+                            disabled={pendingFeedbackId === article.id}
+                            onClick={() => handleFeedback(article.id, 'like')}
+                          >
+                            👍 Like
+                          </button>
+                          <button
+                            type="button"
+                            className={`reaction-btn ${feedbackMap[article.id] === 'dislike' ? 'active-dislike' : ''}`}
+                            disabled={pendingFeedbackId === article.id}
+                            onClick={() => handleFeedback(article.id, 'dislike')}
+                          >
+                            👎 Dislike
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
-                </a>
+                </article>
               );
-            })}
+            })
+          )}
+        </section>
+      </section>
+
+      <aside className="news-side-col reveal-2">
+        <section className="side-card">
+          <div className="side-card-header">
+            <h3>Daily Briefing</h3>
+            <button
+              className="button-primary"
+              type="button"
+              onClick={handleGenerateReport}
+              disabled={isGeneratingReport}
+            >
+              {isGeneratingReport ? 'Generating...' : 'Generate Report'}
+            </button>
           </div>
-        )}
-      </>
+
+          {isReportLoading ? (
+            <p className="side-state">Loading latest report...</p>
+          ) : reportError ? (
+            <p className="side-state error">{reportError}</p>
+          ) : reportData ? (
+            <>
+              <p className="side-time">
+                {new Date(reportData.report_date).toLocaleString()}
+              </p>
+              <pre className="report-text">{reportData.report_text}</pre>
+            </>
+          ) : (
+            <p className="side-state">No report yet. Generate your first personalized report.</p>
+          )}
+        </section>
+      </aside>
+
+      {readerArticle && (
+        <div className="reader-overlay" onClick={handleCloseReader} role="dialog" aria-modal="true">
+          <article className="reader-panel" onClick={(event) => event.stopPropagation()}>
+            <header className="reader-head">
+              <div>
+                <p className="eyebrow">In-app article reader</p>
+                <h3>{readerArticle.title}</h3>
+                <p className="reader-meta">
+                  {(readerContent?.source || readerArticle.source || 'Unknown source')} •{' '}
+                  {new Date(readerArticle.published_at).toLocaleString()}
+                  {readerContent?.word_count ? ` • ${readerContent.word_count} words` : ''}
+                </p>
+              </div>
+              <button type="button" className="button-secondary" onClick={handleCloseReader}>
+                Close
+              </button>
+            </header>
+
+            {isReaderLoading ? (
+              <div className="loading-panel">Loading full article content...</div>
+            ) : readerError ? (
+              <div className="error-message">{readerError}</div>
+            ) : readerContent?.is_full_content_available ? (
+              <div className="reader-body">
+                {readerParagraphs.map((paragraph, index) => (
+                  <p key={`reader-paragraph-${index}`}>{paragraph}</p>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-panel reader-empty">
+                <p>
+                  {readerLikelyBlocked
+                    ? 'This publisher is blocking automated extraction for now. Open the source article directly.'
+                    : 'Could not extract enough body text for this story yet. Open the source article directly.'}
+                </p>
+                {readerFallbackPreview && (
+                  <p className="reader-fallback-preview">Preview: {readerFallbackPreview}</p>
+                )}
+                {readerExtractionStatus && (
+                  <p className="reader-status-hint">Status: {readerExtractionStatus}</p>
+                )}
+              </div>
+            )}
+
+            <footer className="reader-foot">
+              <a
+                className="button-primary"
+                href={readerContent?.canonical_url || readerArticle.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Original Source
+              </a>
+            </footer>
+          </article>
+        </div>
+      )}
     </div>
   );
 }

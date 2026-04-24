@@ -2,27 +2,158 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
-from urllib.parse import urlparse
-import hashlib
-from typing import List
-from . import models, schemas, auth, db, classifier, news_fetcher, scraper, content_extractor # Import all services
+from typing import Dict, List
+from . import models, schemas, auth, db, news_fetcher, tasks, ingestion_service # Import all services
+from .config import settings
 from .db import get_db # Import get_db
+from .ranking import (
+    FeedbackEvent,
+    FeedbackTopicScore,
+    compute_feedback_preference_weights,
+    compute_feed_ranking_score,
+    extract_source_key,
+)
 
 api_router = APIRouter()
 
 
-def _normalize_domain(url: str) -> str:
-    parsed = urlparse(url)
-    domain = (parsed.netloc or "").lower().strip()
-    if domain.startswith("www."):
-        domain = domain[4:]
-    return domain
+def _source_key_for_article(article: models.Article) -> str:
+    source_domain = article.source_ref.domain if article.source_ref else None
+    return extract_source_key(
+        source_domain=source_domain,
+        source_name=article.source,
+        article_url=article.url,
+    )
 
 
-def _safe_status(value: str, max_length: int = 50) -> str:
-    if not value:
-        return "unknown"
-    return value[:max_length]
+def _rebuild_user_preference_profile(db_session: Session, user_id: int) -> models.UserPreferenceProfile:
+    feedback_rows = (
+        db_session.query(models.UserFeedback)
+        .options(
+            joinedload(models.UserFeedback.article)
+            .joinedload(models.Article.topic_scores)
+            .joinedload(models.ArticleTopicScore.topic),
+            joinedload(models.UserFeedback.article).joinedload(models.Article.source_ref),
+        )
+        .filter(models.UserFeedback.user_id == user_id)
+        .all()
+    )
+
+    feedback_events: List[FeedbackEvent] = []
+    for row in feedback_rows:
+        article = row.article
+        topic_scores = [
+            FeedbackTopicScore(
+                topic=article_topic_score.topic.name,
+                score=float(article_topic_score.score),
+            )
+            for article_topic_score in article.topic_scores
+        ]
+        feedback_events.append(
+            FeedbackEvent(
+                feedback_type=row.feedback_type,
+                topic_scores=topic_scores,
+                source_key=_source_key_for_article(article),
+            )
+        )
+
+    topic_weights, source_weights = compute_feedback_preference_weights(feedback_events)
+
+    profile = (
+        db_session.query(models.UserPreferenceProfile)
+        .filter(models.UserPreferenceProfile.user_id == user_id)
+        .one_or_none()
+    )
+    if profile is None:
+        profile = models.UserPreferenceProfile(
+            user_id=user_id,
+            topic_weights_json=topic_weights,
+            source_weights_json=source_weights,
+        )
+        db_session.add(profile)
+    else:
+        profile.topic_weights_json = topic_weights
+        profile.source_weights_json = source_weights
+        profile.updated_at = datetime.utcnow()
+
+    db_session.commit()
+    db_session.refresh(profile)
+    return profile
+
+
+def _build_personalized_report_payload(
+    db_session: Session,
+    current_user: models.User,
+) -> tuple[str, Dict[str, str]]:
+    user_with_topics = (
+        db_session.query(models.User)
+        .options(joinedload(models.User.topics))
+        .filter(models.User.id == current_user.id)
+        .one()
+    )
+    user_topic_ids = [topic.id for topic in user_with_topics.topics]
+
+    profile = (
+        db_session.query(models.UserPreferenceProfile)
+        .filter(models.UserPreferenceProfile.user_id == current_user.id)
+        .one_or_none()
+    )
+    topic_weights = profile.topic_weights_json if profile else {}
+
+    top_pref_topics = sorted(
+        topic_weights.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:3]
+
+    feedback_rows = (
+        db_session.query(models.UserFeedback)
+        .filter(models.UserFeedback.user_id == current_user.id)
+        .order_by(models.UserFeedback.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    likes_count = len([row for row in feedback_rows if row.feedback_type == "like"])
+    dislikes_count = len(feedback_rows) - likes_count
+
+    recent_articles = []
+    if user_topic_ids:
+        recent_articles = (
+            db_session.query(models.Article)
+            .join(models.ArticleTopicScore, models.Article.id == models.ArticleTopicScore.article_id)
+            .filter(models.ArticleTopicScore.topic_id.in_(user_topic_ids))
+            .order_by(models.Article.published_at.desc())
+            .limit(5)
+            .all()
+        )
+
+    topic_summary = ", ".join(topic.name for topic in user_with_topics.topics[:5]) or "No topics selected"
+    top_topics_summary = ", ".join(
+        f"{name} ({score:.2f})" for name, score in top_pref_topics
+    ) or "No learned preferences yet"
+    headline_summary = "\n".join(
+        f"- {article.title}"
+        for article in recent_articles
+    ) or "- No recent personalized articles yet"
+
+    report_text = (
+        "Personalized News Report\n"
+        f"Generated at: {datetime.utcnow().isoformat()}Z\n"
+        f"Tracked topics: {topic_summary}\n"
+        f"Top learned preferences: {top_topics_summary}\n"
+        f"Recent feedback: {likes_count} likes, {dislikes_count} dislikes\n"
+        "Top recent articles:\n"
+        f"{headline_summary}\n"
+        "Action: Continue reacting with like/dislike to sharpen ranking quality."
+    )
+
+    metadata_json = {
+        "likes_count": str(likes_count),
+        "dislikes_count": str(dislikes_count),
+        "topics_selected": str(len(user_topic_ids)),
+        "recent_articles": str(len(recent_articles)),
+    }
+    return report_text, metadata_json
 
 # --- Authentication Endpoints ---
 
@@ -123,205 +254,314 @@ def get_all_topics(db_session: Session = Depends(get_db)):
 
 @api_router.post("/articles/fetch-and-process", tags=["Articles"])
 def fetch_and_process_articles(
-    # 1. This now correctly accepts the list of IDs from the frontend
-    request_body: schemas.ArticleFetchRequest, 
-    db_session: Session = Depends(get_db), 
+    request_body: schemas.ArticleFetchRequest,
+    db_session: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    
-    topic_ids_to_process = request_body.topic_ids
+    topic_ids_to_process = list(dict.fromkeys(request_body.topic_ids))
     if not topic_ids_to_process:
         raise HTTPException(status_code=400, detail="No topic IDs provided.")
 
     print(f"User {current_user.email} requested fetch for {len(topic_ids_to_process)} topics.")
 
-    #  2. Query the database for *only* the topics the user requested.
-    topics_to_fetch = db_session.query(models.Topic).filter(
-        models.Topic.id.in_(topic_ids_to_process)
-    ).all()
-
-    if not topics_to_fetch:
-        raise HTTPException(status_code=404, detail="None of the selected topics were found.")
-
-    all_topics_in_db = db_session.query(models.Topic).all()
-    all_topic_names = [topic.name for topic in all_topics_in_db]
-    if not all_topic_names:
-         raise HTTPException(status_code=500, detail="No topics found in database for classifier.")
-
-
-    all_new_articles_saved = []
-
-    # 3. Loop through the *small list* of topics (e.g., 3)
-    #    instead of all 15 topics.
-    for topic in topics_to_fetch:
-        print(f"--- Fetching for topic: {topic.name} ---")
-        
-        # 4. Call your *existing* news_fetcher function for one topic
-        #    (We'll fetch 10 articles to get good coverage)
-        fetched_articles_data = news_fetcher.fetch_articles_for_topic(
-            topic_name=topic.name, 
-            max_articles=10 
+    topics_to_fetch = (
+        db_session.query(models.Topic)
+        .filter(models.Topic.id.in_(topic_ids_to_process))
+        .all()
+    )
+    if len(topics_to_fetch) != len(topic_ids_to_process):
+        found_ids = {topic.id for topic in topics_to_fetch}
+        missing_ids = sorted(set(topic_ids_to_process) - found_ids)
+        raise HTTPException(
+            status_code=404,
+            detail=f"Topic IDs not found: {missing_ids}",
         )
 
-        # 5. --- This is logic to classify and save ---
-        for article_data in fetched_articles_data:
-            # Check if this article URL is already in our database
-            existing_article = db_session.query(models.Article).filter(
-                models.Article.url == article_data["url"]
-            ).first()
+    if settings.ENABLE_ASYNC_INGESTION:
+        run = ingestion_service.create_ingestion_run(
+            db_session=db_session,
+            topic_ids=topic_ids_to_process,
+            status="queued",
+        )
+        try:
+            async_result = tasks.process_ingestion_run.delay(
+                run.run_id,
+                topic_ids_to_process,
+                settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+            )
+            return schemas.IngestionEnqueueResponse(
+                message="Ingestion job queued.",
+                run_id=run.run_id,
+                task_id=async_result.id,
+                status="queued",
+                topics_total=len(topic_ids_to_process),
+            )
+        except Exception as exc:
+            # If Redis/Celery is unavailable, keep the endpoint usable by falling back
+            # to in-process execution and preserving ingestion run accounting.
+            summary = ingestion_service.process_ingestion_topic_batch(
+                db_session=db_session,
+                topic_ids=topic_ids_to_process,
+                run_id=run.run_id,
+                max_articles_per_topic=settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+            )
+            return {
+                "message": "Async queue unavailable. Ingestion completed synchronously.",
+                "run_id": run.run_id,
+                "queue_error": str(exc),
+                "summary": summary,
+            }
 
-            if existing_article:
-                # Backfill full content for existing rows that were previously metadata-only.
-                if existing_article.clean_text:
-                    continue
-                try:
-                    scraped_payload = scraper.fetch_article_html(article_data["url"])
-                    extracted = content_extractor.extract_article_content(
-                        raw_html=scraped_payload.get("raw_html"),
-                        url=scraped_payload.get("final_url") or article_data["url"],
-                    )
-
-                    clean_text = extracted.get("clean_text")
-                    extraction_status = extracted.get("status") or "extraction_failed"
-                    if scraped_payload.get("error") and not scraped_payload.get("raw_html"):
-                        extraction_status = "fetch_failed"
-
-                    existing_article.canonical_url = (
-                        existing_article.canonical_url
-                        or article_data.get("canonical_url")
-                        or extracted.get("canonical_url")
-                        or scraped_payload.get("final_url")
-                    )
-                    existing_article.raw_html = scraped_payload.get("raw_html") or existing_article.raw_html
-                    existing_article.clean_text = clean_text or existing_article.clean_text
-                    existing_article.word_count = extracted.get("word_count") or existing_article.word_count
-                    existing_article.author = extracted.get("author") or existing_article.author
-                    existing_article.image_url = (
-                        existing_article.image_url
-                        or article_data.get("image_url")
-                        or extracted.get("image_url")
-                    )
-                    existing_article.extraction_status = _safe_status(extraction_status)
-                    existing_article.fetched_at = scraped_payload.get("fetched_at") or datetime.utcnow()
-                    if clean_text and not existing_article.content_hash:
-                        existing_article.content_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
-
-                    db_session.add(existing_article)
-                    db_session.commit()
-                    print(f"Enriched existing article: {existing_article.title}")
-                except Exception as enrich_error:
-                    print(f"Error enriching article {article_data['title']}: {enrich_error}")
-                    db_session.rollback()
-                continue
-
-            # If it's a new article, process it
-            try:
-                    scraped_payload = scraper.fetch_article_html(article_data["url"])
-                    extracted = content_extractor.extract_article_content(
-                        raw_html=scraped_payload.get("raw_html"),
-                        url=scraped_payload.get("final_url") or article_data["url"],
-                    )
-
-                    extraction_status = extracted.get("status") or "extraction_failed"
-                    if scraped_payload.get("error") and not scraped_payload.get("raw_html"):
-                        extraction_status = "fetch_failed"
-                    extraction_status = _safe_status(extraction_status)
-
-                    clean_text = extracted.get("clean_text")
-                    content_to_classify = (
-                        clean_text[:3500]
-                        if clean_text
-                        else f"{article_data['title']}. {article_data['description']}"
-                    )
-                    
-                    classification_list = classifier.classify_article_content(
-                        content=content_to_classify,
-                        topics=all_topic_names 
-                    )
-                    
-                    classification_results = {
-                        item['topic']: item['score'] for item in classification_list
-                    }
-
-                    source_domain = _normalize_domain(article_data["url"])
-                    source_row = None
-                    if source_domain:
-                        source_row = db_session.query(models.Source).filter(
-                            models.Source.domain == source_domain
-                        ).one_or_none()
-                        if not source_row:
-                            source_row = models.Source(domain=source_domain)
-                            db_session.add(source_row)
-                            db_session.flush()
-
-                    published_at = (
-                        extracted.get("published_at")
-                        or article_data.get("published_at")
-                        or datetime.utcnow()
-                    )
-
-                    canonical_url = (
-                        article_data.get("canonical_url")
-                        or extracted.get("canonical_url")
-                        or scraped_payload.get("final_url")
-                        or article_data["url"]
-                    )
-
-                    content_hash = (
-                        hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
-                        if clean_text
-                        else None
-                    )
-                    
-                    # 7. Create the new Article database object
-                    new_article = models.Article(
-                        title=article_data["title"],
-                        description=article_data["description"],
-                        url=article_data["url"],
-                        canonical_url=canonical_url,
-                        source=article_data["source"],
-                        source_id=source_row.id if source_row else None,
-                        author=extracted.get("author"),
-                        image_url=article_data.get("image_url") or extracted.get("image_url"),
-                        raw_html=scraped_payload.get("raw_html"),
-                        clean_text=clean_text,
-                        word_count=extracted.get("word_count"),
-                        content_hash=content_hash,
-                        published_at=published_at,
-                        fetched_at=scraped_payload.get("fetched_at") or datetime.utcnow(),
-                        extraction_status=extraction_status,
-                    )
-                    db_session.add(new_article)
-                    db_session.flush()
-
-                    # 8. Link the article to its topics in the join table
-                    for result_topic_name, percentage in classification_results.items():
-                        # Find the topic object for this name
-                        topic_in_db = db_session.query(models.Topic).filter(models.Topic.name == result_topic_name).first()
-                        
-                        # Only link if the topic exists and percentage is significant (e.g., > 10%)
-                        if topic_in_db and percentage > 0.1:
-                            link = models.ArticleTopicScore(
-                                article_id=new_article.id,
-                                topic_id=topic_in_db.id,
-                                score=percentage
-                            )
-                            db_session.add(link)
-                    
-                    db_session.commit() # Commit article and topic links in one transaction
-                    db_session.refresh(new_article)
-                    all_new_articles_saved.append(new_article)
-                    print(f"Saved new article: {new_article.title}")
-
-            except Exception as e:
-                print(f"Error classifying/saving article {article_data['title']}: {e}")
-                db_session.rollback() # Roll back any partial saves for this article
-    
-    print(f"--- Fetch complete. Saved {len(all_new_articles_saved)} new articles. ---")
+    summary = ingestion_service.process_ingestion_topic_batch(
+        db_session=db_session,
+        topic_ids=topic_ids_to_process,
+        run_id=None,
+        max_articles_per_topic=settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+    )
     return {
-        "message": f"Successfully processed {len(topics_to_fetch)} topics and saved {len(all_new_articles_saved)} new articles."
+        "message": "Ingestion completed synchronously.",
+        "summary": summary,
     }
-    
+
+
+@api_router.get("/ingestion/runs", response_model=List[schemas.IngestionRunOut], tags=["Ingestion"])
+def list_ingestion_runs(
+    limit: int = Query(20, ge=1, le=100),
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    # Keep authenticated access enforced for operational endpoints.
+    _ = current_user
+    return (
+        db_session.query(models.IngestionRun)
+        .order_by(models.IngestionRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+@api_router.get("/ingestion/runs/{run_id}", response_model=schemas.IngestionRunOut, tags=["Ingestion"])
+def get_ingestion_run(
+    run_id: str,
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    _ = current_user
+    run = (
+        db_session.query(models.IngestionRun)
+        .filter(models.IngestionRun.run_id == run_id)
+        .one_or_none()
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Ingestion run not found.")
+    return run
+
+
+@api_router.get("/articles/{article_id}/full-content", response_model=schemas.FullArticleContentOut, tags=["Articles"])
+def get_full_article_content(
+    article_id: int,
+    refresh_if_missing: bool = Query(default=True),
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    _ = current_user
+    article = (
+        db_session.query(models.Article)
+        .filter(models.Article.id == article_id)
+        .one_or_none()
+    )
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found.")
+
+    clean_text = (article.clean_text or "").strip()
+    has_full_content = len(clean_text) >= settings.FULL_ARTICLE_MIN_CHARS
+
+    if not has_full_content and refresh_if_missing:
+        article = ingestion_service.hydrate_article_content(db_session, article)
+        clean_text = (article.clean_text or "").strip()
+        has_full_content = len(clean_text) >= settings.FULL_ARTICLE_MIN_CHARS
+
+    return schemas.FullArticleContentOut(
+        article_id=article.id,
+        title=article.title,
+        source=article.source,
+        published_at=article.published_at,
+        url=article.url,
+        canonical_url=article.canonical_url,
+        extraction_status=article.extraction_status,
+        word_count=article.word_count,
+        clean_text=article.clean_text,
+        is_full_content_available=has_full_content,
+    )
+
+
+@api_router.post("/admin/ingestion/run-active", tags=["Admin"])
+def run_active_topic_ingestion(
+    batch_size: int = Query(default=settings.ASYNC_INGESTION_TOPIC_BATCH_SIZE, ge=1, le=500),
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    _ = current_user
+    active_topics = (
+        db_session.query(models.Topic)
+        .filter(models.Topic.active.is_(True))
+        .order_by(models.Topic.id.asc())
+        .limit(batch_size)
+        .all()
+    )
+
+    topic_ids = [topic.id for topic in active_topics]
+    if not topic_ids:
+        raise HTTPException(status_code=404, detail="No active topics found.")
+
+    run = ingestion_service.create_ingestion_run(
+        db_session=db_session,
+        topic_ids=topic_ids,
+        status="queued",
+    )
+
+    if settings.ENABLE_ASYNC_INGESTION:
+        try:
+            async_result = tasks.process_ingestion_run.delay(
+                run.run_id,
+                topic_ids,
+                settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+            )
+            return {
+                "message": "Active-topic ingestion queued.",
+                "status": "queued",
+                "run_id": run.run_id,
+                "task_id": async_result.id,
+                "topics_total": len(topic_ids),
+            }
+        except Exception as exc:
+            summary = ingestion_service.process_ingestion_topic_batch(
+                db_session=db_session,
+                topic_ids=topic_ids,
+                run_id=run.run_id,
+                max_articles_per_topic=settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+            )
+            return {
+                "message": "Async queue unavailable. Active-topic ingestion completed synchronously.",
+                "status": "completed",
+                "run_id": run.run_id,
+                "queue_error": str(exc),
+                "topics_total": len(topic_ids),
+                "summary": summary,
+            }
+
+    summary = ingestion_service.process_ingestion_topic_batch(
+        db_session=db_session,
+        topic_ids=topic_ids,
+        run_id=run.run_id,
+        max_articles_per_topic=settings.INGESTION_MAX_ARTICLES_PER_TOPIC,
+    )
+    return {
+        "message": "Active-topic ingestion completed synchronously.",
+        "status": "completed",
+        "run_id": run.run_id,
+        "topics_total": len(topic_ids),
+        "summary": summary,
+    }
+
+
+@api_router.post("/articles/{article_id}/feedback", response_model=schemas.UserFeedbackOut, tags=["Feedback"])
+def submit_article_feedback(
+    article_id: int,
+    feedback_in: schemas.FeedbackRequest,
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    article = (
+        db_session.query(models.Article)
+        .filter(models.Article.id == article_id)
+        .one_or_none()
+    )
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found.")
+
+    feedback = (
+        db_session.query(models.UserFeedback)
+        .filter(
+            models.UserFeedback.user_id == current_user.id,
+            models.UserFeedback.article_id == article_id,
+        )
+        .one_or_none()
+    )
+
+    if feedback is None:
+        feedback = models.UserFeedback(
+            user_id=current_user.id,
+            article_id=article_id,
+            feedback_type=feedback_in.feedback_type,
+        )
+        db_session.add(feedback)
+    else:
+        feedback.feedback_type = feedback_in.feedback_type
+
+    db_session.commit()
+    db_session.refresh(feedback)
+
+    _rebuild_user_preference_profile(db_session, current_user.id)
+    return feedback
+
+
+@api_router.get("/users/me/preferences", response_model=schemas.UserPreferenceProfileOut, tags=["Users"])
+def get_user_preference_profile(
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    profile = (
+        db_session.query(models.UserPreferenceProfile)
+        .filter(models.UserPreferenceProfile.user_id == current_user.id)
+        .one_or_none()
+    )
+
+    if profile is None:
+        profile = models.UserPreferenceProfile(
+            user_id=current_user.id,
+            topic_weights_json={},
+            source_weights_json={},
+        )
+        db_session.add(profile)
+        db_session.commit()
+        db_session.refresh(profile)
+
+    return profile
+
+
+@api_router.post("/reports/generate", response_model=schemas.PersonalizedReportOut, tags=["Reports"])
+def generate_personalized_report(
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    report_text, metadata_json = _build_personalized_report_payload(db_session, current_user)
+    report = models.PersonalizedReport(
+        user_id=current_user.id,
+        report_date=datetime.utcnow(),
+        report_text=report_text,
+        metadata_json=metadata_json,
+    )
+    db_session.add(report)
+    db_session.commit()
+    db_session.refresh(report)
+    return report
+
+
+@api_router.get("/reports/latest", response_model=schemas.PersonalizedReportOut, tags=["Reports"])
+def get_latest_personalized_report(
+    db_session: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
+):
+    report = (
+        db_session.query(models.PersonalizedReport)
+        .filter(models.PersonalizedReport.user_id == current_user.id)
+        .order_by(models.PersonalizedReport.report_date.desc())
+        .first()
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="No report found. Generate one first.")
+    return report
 
 
 @api_router.get("/feed", response_model=List[schemas.FeedArticle], tags=["Feed"])
@@ -338,54 +578,96 @@ def get_personalized_feed(
     3. Bundles each article with the *specific topic* that matched it.
     4. Returns this new bundled list to the frontend.
     """
-    # Eagerly load topics for the current user
     user_with_topics = db_session.query(models.User).options(
         joinedload(models.User.topics)
     ).filter(models.User.id == current_user.id).one_or_none()
 
     if not user_with_topics:
-        return [] # Should not happen if user is authenticated
+        return []
 
     user_topic_ids = [topic.id for topic in user_with_topics.topics]
-    
-    if not user_topic_ids:
-        return [] # Return empty list if user has no topics
 
-    # This query finds all ArticleTopicScore links
-    # that match the user's topics.
-    # It also pre-loads the 'article' and 'topic' data to avoid extra queries.
-    # 'joinedload' is already imported at the top of the file.
+    if not user_topic_ids:
+        return []
+
+    profile = (
+        db_session.query(models.UserPreferenceProfile)
+        .filter(models.UserPreferenceProfile.user_id == current_user.id)
+        .one_or_none()
+    )
+    topic_weights = profile.topic_weights_json if profile else {}
+    source_weights = profile.source_weights_json if profile else {}
 
     feed_links = db_session.query(models.ArticleTopicScore).join(
         models.Article, models.Article.id == models.ArticleTopicScore.article_id
     ).options(
-        joinedload(models.ArticleTopicScore.article),
+        joinedload(models.ArticleTopicScore.article).joinedload(models.Article.source_ref),
         joinedload(models.ArticleTopicScore.topic)
     ).filter(
         models.ArticleTopicScore.topic_id.in_(user_topic_ids)
     ).order_by(
+        models.Article.fetched_at.desc(),
         models.Article.published_at.desc()
-    ).limit(100).all() # Limit to 50 most recent articles
+    ).limit(400).all()
 
-    # The query above can return duplicates if an article matches
-    # multiple topics (e.g., "Gaming" and "Technology").
-    # We'll use a set to keep track of articles we've already added.
-    feed_results = []
-    seen_article_ids = set()
+    if not feed_links:
+        return []
+
+    candidate_article_ids = list({link.article_id for link in feed_links})
+    feedback_rows = (
+        db_session.query(models.UserFeedback)
+        .filter(
+            models.UserFeedback.user_id == current_user.id,
+            models.UserFeedback.article_id.in_(candidate_article_ids),
+        )
+        .all()
+    )
+    feedback_map = {row.article_id: row.feedback_type for row in feedback_rows}
+
+    ranked_by_article: Dict[int, schemas.FeedArticle] = {}
+    ranking_scores: Dict[int, float] = {}
+    freshness_scores: Dict[int, datetime] = {}
 
     for link in feed_links:
-        if link.article_id not in seen_article_ids:
-            # This is the new "package" we're sending to the frontend
-            # This assumes your schemas.py has a 'FeedArticle' schema
-            feed_item = schemas.FeedArticle(
-                article=link.article,
+        article = link.article
+        source_key = _source_key_for_article(article)
+        topic_weight = float(topic_weights.get(link.topic.name, 0.0))
+        source_weight = float(source_weights.get(source_key, 0.0)) if source_key else 0.0
+
+        feedback_type = feedback_map.get(link.article_id)
+        ranking_score = compute_feed_ranking_score(
+            match_score=link.score,
+            topic_weight=topic_weight,
+            source_weight=source_weight,
+            feedback_type=feedback_type,
+            published_at=article.published_at,
+        )
+
+        article_freshness = article.fetched_at or article.published_at
+        current_freshness = freshness_scores.get(link.article_id)
+        if current_freshness is None or article_freshness > current_freshness:
+            freshness_scores[link.article_id] = article_freshness
+
+        if link.article_id not in ranking_scores or ranking_score > ranking_scores[link.article_id]:
+            ranking_scores[link.article_id] = ranking_score
+            ranked_by_article[link.article_id] = schemas.FeedArticle(
+                article=article,
                 matched_topic=link.topic,
-                matched_score=link.score
+                matched_score=link.score,
+                ranking_score=ranking_score,
+                source_weight=source_weight,
+                topic_weight=topic_weight,
             )
-            feed_results.append(feed_item)
-            seen_article_ids.add(link.article_id)
-            
-    return feed_results
+
+    return sorted(
+        ranked_by_article.values(),
+        key=lambda item: (
+            freshness_scores.get(item.article.id) or item.article.published_at,
+            item.ranking_score if item.ranking_score is not None else -999,
+            item.article.published_at,
+        ),
+        reverse=True,
+    )[:100]
 
 
 @api_router.get("/search", response_model=List[schemas.SearchArticleSchema], tags=["Search"])

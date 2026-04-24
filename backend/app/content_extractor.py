@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any, Dict, Optional
 
 import dateparser
 from bs4 import BeautifulSoup
 
 MIN_CONTENT_CHARS = 250
+BLOCKED_PAGE_MARKERS = (
+    "enable js and disable any ad blocker",
+    "access denied",
+    "verify you are human",
+    "captcha",
+    "bot detection",
+)
 
 
 def _parse_possible_date(value: Optional[str]) -> Optional[datetime]:
@@ -18,6 +26,11 @@ def _parse_possible_date(value: Optional[str]) -> Optional[datetime]:
 
 def _clean_text(text: str) -> str:
     return " ".join(text.split())
+
+
+def _looks_like_blocked_page(raw_html: str) -> bool:
+    html_lower = raw_html.lower()
+    return any(marker in html_lower for marker in BLOCKED_PAGE_MARKERS)
 
 
 def _extract_metadata_from_meta_tags(soup: BeautifulSoup) -> Dict[str, Optional[str]]:
@@ -124,6 +137,79 @@ def _extract_with_bs4(raw_html: str) -> Dict[str, Any]:
     }
 
 
+def _extract_with_json_ld(raw_html: str) -> Dict[str, Any]:
+    soup = BeautifulSoup(raw_html, "html.parser")
+
+    scripts = soup.find_all("script", attrs={"type": "application/ld+json"})
+    for script in scripts:
+        payload = script.string or script.get_text(strip=True)
+        if not payload:
+            continue
+
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+
+        nodes = parsed if isinstance(parsed, list) else [parsed]
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+
+            node_type = node.get("@type")
+            node_type_list = node_type if isinstance(node_type, list) else [node_type]
+            node_type_text = " ".join(str(item).lower() for item in node_type_list if item)
+            if "article" not in node_type_text and "news" not in node_type_text:
+                continue
+
+            body_text = node.get("articleBody") or node.get("text")
+            clean_text = _clean_text(str(body_text)) if body_text else None
+
+            author_raw = node.get("author")
+            author_value = None
+            if isinstance(author_raw, dict):
+                author_value = author_raw.get("name")
+            elif isinstance(author_raw, list):
+                names = []
+                for author in author_raw:
+                    if isinstance(author, dict) and author.get("name"):
+                        names.append(str(author.get("name")))
+                    elif isinstance(author, str):
+                        names.append(author)
+                author_value = ", ".join(names) if names else None
+            elif isinstance(author_raw, str):
+                author_value = author_raw
+
+            image_raw = node.get("image")
+            image_url = None
+            if isinstance(image_raw, str):
+                image_url = image_raw
+            elif isinstance(image_raw, list) and image_raw:
+                image_url = str(image_raw[0])
+            elif isinstance(image_raw, dict):
+                image_url = image_raw.get("url")
+
+            return {
+                "clean_text": clean_text,
+                "title": node.get("headline") or node.get("name"),
+                "author": author_value,
+                "image_url": image_url,
+                "published_at": _parse_possible_date(node.get("datePublished")),
+                "canonical_url": node.get("url"),
+                "status": "extracted_jsonld" if clean_text else "jsonld_empty",
+            }
+
+    return {
+        "clean_text": None,
+        "title": None,
+        "author": None,
+        "image_url": None,
+        "published_at": None,
+        "canonical_url": None,
+        "status": "jsonld_empty",
+    }
+
+
 def extract_article_content(raw_html: Optional[str], url: Optional[str] = None) -> Dict[str, Any]:
     """
     Extract full article content and metadata using fallback strategy.
@@ -140,13 +226,30 @@ def extract_article_content(raw_html: Optional[str], url: Optional[str] = None) 
             "status": "no_html",
         }
 
+    if _looks_like_blocked_page(raw_html):
+        return {
+            "clean_text": None,
+            "word_count": None,
+            "title": None,
+            "author": None,
+            "published_at": None,
+            "image_url": None,
+            "canonical_url": url,
+            "status": "blocked_source",
+        }
+
     trafilatura_result = _extract_with_trafilatura(raw_html, url)
     best = trafilatura_result
+    bs4_result = None
+    jsonld_result = None
 
     if not best.get("clean_text") or len(best["clean_text"]) < MIN_CONTENT_CHARS:
         bs4_result = _extract_with_bs4(raw_html)
-        if bs4_result.get("clean_text") and len(bs4_result["clean_text"]) > len(best.get("clean_text") or ""):
-            best = bs4_result
+        jsonld_result = _extract_with_json_ld(raw_html)
+
+        for candidate in (bs4_result, jsonld_result):
+            if candidate.get("clean_text") and len(candidate["clean_text"]) > len(best.get("clean_text") or ""):
+                best = candidate
 
     clean_text = best.get("clean_text")
     word_count = len(clean_text.split()) if clean_text else None

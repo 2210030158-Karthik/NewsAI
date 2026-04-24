@@ -1,139 +1,134 @@
 import React, { useState } from 'react';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'http://127.0.0.1:8011';
 
-// 1. Add the new 'onBack' prop
-export function AuthForm({ onLoginSuccess, onBack }) {
-  const [isLogin, setIsLogin] = useState(true);
+export function AuthForm({ onLoginSuccess, onBackToLanding }) {
+  const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
+  const isLogin = mode === 'login';
+
+  const loginAndHydrateUser = async (identityEmail, identityPassword) => {
+    const formData = new URLSearchParams();
+    formData.append('username', identityEmail);
+    formData.append('password', identityPassword);
+
+    const loginResponse = await fetch(`${API_BASE_URL}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData,
+    });
+
+    if (!loginResponse.ok) {
+      const errData = await loginResponse.json();
+      throw new Error(errData.detail || 'Login failed.');
+    }
+
+    const loginData = await loginResponse.json();
+    const userResponse = await fetch(`${API_BASE_URL}/users/me`, {
+      headers: { Authorization: `Bearer ${loginData.access_token}` },
+    });
+
+    if (!userResponse.ok) {
+      throw new Error('Could not load user profile.');
+    }
+
+    const userData = await userResponse.json();
+    onLoginSuccess(loginData.access_token, userData);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setIsLoading(true);
+    setError('');
 
-    if (isLogin) {
-      // --- Handle Login ---
-      const formData = new URLSearchParams();
-      formData.append('username', email);
-      formData.append('password', password);
-      try {
-        const response = await fetch(`${API_BASE_URL}/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: formData,
-        });
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.detail || 'Failed to log in');
-        }
-        const data = await response.json();
-        const userResponse = await fetch(`${API_BASE_URL}/users/me`, {
-          headers: { 'Authorization': `Bearer ${data.access_token}` },
-        });
-        const userData = await userResponse.json();
-        onLoginSuccess(data.access_token, userData);
-      } catch (err) {
-        setError(err.message);
-      }
-    } else {
-      // --- Handle Sign Up ---
-      try {
-        const response = await fetch(`${API_BASE_URL}/signup`, {
+    try {
+      if (!isLogin) {
+        const signupResponse = await fetch(`${API_BASE_URL}/signup`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password }),
         });
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.detail || 'Failed to sign up');
+
+        if (!signupResponse.ok) {
+          const errData = await signupResponse.json();
+          throw new Error(errData.detail || 'Signup failed.');
         }
-        // Auto-login after signup
-        const formData = new URLSearchParams();
-        formData.append('username', email);
-        formData.append('password', password);
-        const loginResponse = await fetch(`${API_BASE_URL}/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: formData,
-        });
-        const loginData = await loginResponse.json();
-        const userResponse = await fetch(`${API_BASE_URL}/users/me`, {
-          headers: { 'Authorization': `Bearer ${loginData.access_token}` },
-        });
-        const userData = await userResponse.json();
-        onLoginSuccess(loginData.access_token, userData);
-      } catch (err) {
-        setError(err.message);
       }
+
+      await loginAndHydrateUser(email, password);
+    } catch (submitError) {
+      setError(submitError.message || 'Something went wrong.');
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   return (
-    <div className="card">
-      {/* 2. Add the "Back" button */}
-      <button onClick={onBack} className="back-link">
-        &larr; Back to Home
-      </button>
+    <section className="auth-layout">
+      <div className="auth-panel">
+        <button className="text-action" onClick={onBackToLanding} type="button">
+          Back to landing
+        </button>
 
-      <h2 style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        {isLogin ? 'Log In' : 'Sign Up'}
-      </h2>
-      <form onSubmit={handleSubmit} className="form-container">
-        <div className="form-group">
-          <label htmlFor="email">Email</label>
+        <div className="auth-heading-wrap">
+          <p className="eyebrow">Personalized News OS</p>
+          <h2 className="auth-title">{isLogin ? 'Welcome back' : 'Create your account'}</h2>
+          <p className="auth-subtitle">
+            {isLogin
+              ? 'Sign in to refresh your ranked feed and reports.'
+              : 'Start building your own real-time AI-ranked newsroom.'}
+          </p>
+        </div>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label className="field-label" htmlFor="email-input">
+            Email
+          </label>
           <input
-            id="email"
+            id="email-input"
+            className="field-input"
             type="email"
-            className="form-input"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(event) => setEmail(event.target.value)}
             required
           />
-        </div>
-        <div className="form-group">
-          <label htmlFor="password">Password</label>
+
+          <label className="field-label" htmlFor="password-input">
+            Password
+          </label>
           <input
-            id="password"
+            id="password-input"
+            className="field-input"
             type="password"
-            className="form-input"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
             minLength={6}
             required
           />
-        </div>
 
-        {error && <p style={{ color: '#ef4444' }}>{error}</p>}
+          {error && <div className="inline-error">{error}</div>}
 
-        <button type="submit" className="button-primary" disabled={isLoading}>
-          {isLoading ? 'Loading...' : (isLogin ? 'Log In' : 'Sign Up')}
+          <button className="button-primary" type="submit" disabled={isLoading}>
+            {isLoading ? 'Please wait...' : isLogin ? 'Log In' : 'Create Account'}
+          </button>
+        </form>
+
+        <button
+          className="text-action subtle"
+          type="button"
+          onClick={() => {
+            setMode(isLogin ? 'signup' : 'login');
+            setError('');
+          }}
+        >
+          {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
         </button>
-      </form>
-      <button
-        onClick={() => {
-          setIsLogin(!isLogin);
-          setError('');
-        }}
-        style={{
-          background: 'none',
-          border: 'none',
-          color: '#3b82f6',
-          cursor: 'pointer',
-          marginTop: '1.5rem',
-          width: '100%',
-          textAlign: 'center'
-        }}
-      >
-        {isLogin
-          ? "Don't have an account? Sign Up"
-          : 'Already have an account? Log In'}
-      </button>
-    </div>
+      </div>
+    </section>
   );
 }
 
